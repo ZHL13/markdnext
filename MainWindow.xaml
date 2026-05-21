@@ -17,6 +17,7 @@
         Drop="Window_Drop"
         KeyDown="Window_KeyDown"
         SourceInitialized="Window_SourceInitialized"
+        Icon="Logo.png"
         Background="Transparent">
     <DockPanel x:Name="RootDock" Background="#DDF6F7F9">
         <Menu x:Name="MainMenu" DockPanel.Dock="Top" Background="#EAF3F6FA">

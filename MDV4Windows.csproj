@@ -11,13 +11,33 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>MarkDNext</AssemblyName>
     <RootNamespace>MarkDNext</RootNamespace>
+    <ApplicationIcon>Icon.ico</ApplicationIcon>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Remove=".dotnet\**" />
     <EmbeddedResource Remove=".dotnet\**" />
     <None Remove=".dotnet\**" />
+    <None Remove="Assets\**\*" />
+    <None Remove="Logo.png" />
     <Page Remove=".dotnet\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Logo.png" />
+    <EmbeddedResource Include="Assets\**\*">
+      <LogicalName>Assets/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>
@@ -27,11 +47,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="Assets\**\*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
     <None Update="MarkDNext.colors.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </None>
   </ItemGroup>
 

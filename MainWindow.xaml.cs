@@ -8,6 +8,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -28,6 +29,7 @@ public partial class MainWindow : Window
     private const int ListIndentSize = 4;
     private static readonly UTF8Encoding Utf8NoBom = new(false);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly Lazy<IReadOnlyDictionary<string, string>> EmbeddedAssetNames = new(BuildEmbeddedAssetMap);
 
     private readonly MarkdownPipeline _markdownPipeline;
     private readonly DispatcherTimer _renderTimer;
@@ -2302,6 +2304,25 @@ window.mdvSetPreview = async function (html, sourceLine) {
         };
     }
 
+    private static string GetAssetMimeType(string path)
+    {
+        return Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".css" => "text/css; charset=utf-8",
+            ".js" => "text/javascript; charset=utf-8",
+            ".json" => "application/json; charset=utf-8",
+            ".svg" => "image/svg+xml",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".ttf" => "font/ttf",
+            ".woff" => "font/woff",
+            ".woff2" => "font/woff2",
+            _ => "application/octet-stream"
+        };
+    }
+
     private static string BuildDocumentResourceUri(string relativePath)
     {
         var normalized = relativePath.Replace('\\', '/').TrimStart('/');
@@ -4123,15 +4144,34 @@ refreshEnhancements(document);
             $"https://{DocumentHost}/*",
             CoreWebView2WebResourceContext.Image,
             CoreWebView2WebResourceRequestSourceKinds.All);
-        webView.WebResourceRequested += DocumentResourceRequested;
+        webView.AddWebResourceRequestedFilter(
+            $"https://{AssetHost}/*",
+            CoreWebView2WebResourceContext.All,
+            CoreWebView2WebResourceRequestSourceKinds.All);
+        webView.WebResourceRequested += AppWebResourceRequested;
     }
 
-    private void DocumentResourceRequested(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
+    private void AppWebResourceRequested(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
     {
         if (sender is not CoreWebView2 webView
-            || e.ResourceContext != CoreWebView2WebResourceContext.Image
             || !Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var uri)
-            || !uri.Host.Equals(DocumentHost, StringComparison.OrdinalIgnoreCase))
+            || !uri.Host.Equals(DocumentHost, StringComparison.OrdinalIgnoreCase)
+                && !uri.Host.Equals(AssetHost, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (uri.Host.Equals(AssetHost, StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryCreateAssetResourceResponse(webView, uri, out var response))
+            {
+                e.Response = response;
+            }
+
+            return;
+        }
+
+        if (e.ResourceContext != CoreWebView2WebResourceContext.Image)
         {
             return;
         }
@@ -4156,6 +4196,67 @@ refreshEnhancements(document);
         {
             e.Response = CreateTextResourceResponse(webView, 500, "Internal Server Error", "Could not read image.");
         }
+    }
+
+    private static bool TryCreateAssetResourceResponse(
+        CoreWebView2 webView,
+        Uri uri,
+        out CoreWebView2WebResourceResponse? response)
+    {
+        response = null;
+        var relativePath = Uri.UnescapeDataString(uri.AbsolutePath.TrimStart('/')).Replace('\\', '/');
+        if (string.IsNullOrWhiteSpace(relativePath)
+            || relativePath.Split('/').Any(part => part is "." or ".."))
+        {
+            return false;
+        }
+
+        var key = "Assets/" + relativePath;
+        if (!EmbeddedAssetNames.Value.TryGetValue(key, out var resourceName))
+        {
+            return false;
+        }
+
+        var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName);
+        if (stream is null)
+        {
+            return false;
+        }
+
+        var headers = $"Content-Type: {GetAssetMimeType(relativePath)}\r\nCache-Control: public, max-age=31536000";
+        response = webView.Environment.CreateWebResourceResponse(stream, 200, "OK", headers);
+        return true;
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildEmbeddedAssetMap()
+    {
+        var assembly = Assembly.GetExecutingAssembly();
+        return assembly
+            .GetManifestResourceNames()
+            .Select(name => new
+            {
+                Name = name,
+                Key = NormalizeEmbeddedAssetName(name)
+            })
+            .Where(entry => entry.Key.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().Name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeEmbeddedAssetName(string resourceName)
+    {
+        var normalized = resourceName.Replace('\\', '/');
+        var index = normalized.IndexOf("Assets/", StringComparison.OrdinalIgnoreCase);
+        if (index >= 0)
+        {
+            return normalized[index..];
+        }
+
+        var marker = ".Assets.";
+        index = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        return index >= 0
+            ? "Assets/" + normalized[(index + marker.Length)..].Replace('.', '/')
+            : normalized;
     }
 
     private static CoreWebView2WebResourceResponse CreateTextResourceResponse(
