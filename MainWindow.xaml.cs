@@ -406,6 +406,11 @@ public partial class MainWindow : Window
 
     private void Font_Click(object sender, RoutedEventArgs e)
     {
+        var originalEditorFontFamily = _editorFontFamily;
+        var originalContentFontFamily = _contentFontFamily;
+        var originalEditorFontSize = _editorFontSize;
+        var originalContentFontSize = _contentFontSize;
+
         var familyBox = new ComboBox
         {
             MinWidth = 260,
@@ -470,27 +475,51 @@ public partial class MainWindow : Window
         };
         okButton.Click += (_, _) => dialog.DialogResult = true;
 
-        if (dialog.ShowDialog() != true)
+        string SelectedFamily()
         {
+            return familyBox.SelectedItem is ComboBoxItem { Tag: string familyName }
+                ? familyName
+                : originalEditorFontFamily;
+        }
+
+        double SelectedSize()
+        {
+            if (!double.TryParse(sizeBox.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out var size)
+                && !double.TryParse(sizeBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out size))
+            {
+                size = originalEditorFontSize;
+            }
+
+            return Math.Clamp(size, 8, 48);
+        }
+
+        void ApplyFontPreview()
+        {
+            var selectedFamily = SelectedFamily();
+            _editorFontFamily = string.IsNullOrWhiteSpace(selectedFamily) ? "Consolas" : selectedFamily.Trim();
+            _contentFontFamily = _editorFontFamily;
+            _editorFontSize = SelectedSize();
+            _contentFontSize = Math.Clamp(_editorFontSize + 2, 10, 54);
+            ApplyAppearance();
+            RefreshRenderedShells();
+        }
+
+        familyBox.SelectionChanged += (_, _) => ApplyFontPreview();
+        sizeBox.TextChanged += (_, _) => ApplyFontPreview();
+
+        if (dialog.ShowDialog() == true)
+        {
+            ApplyFontPreview();
+            StatusText.Text = $"Font changed to {_editorFontFamily}";
             return;
         }
 
-        if (!double.TryParse(sizeBox.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out var size)
-            && !double.TryParse(sizeBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out size))
-        {
-            size = _editorFontSize;
-        }
-
-        var selectedFamily = familyBox.SelectedItem is ComboBoxItem { Tag: string familyName }
-            ? familyName
-            : _editorFontFamily;
-        _editorFontFamily = string.IsNullOrWhiteSpace(selectedFamily) ? "Consolas" : selectedFamily.Trim();
-        _contentFontFamily = _editorFontFamily;
-        _editorFontSize = Math.Clamp(size, 8, 48);
-        _contentFontSize = Math.Clamp(size + 2, 10, 54);
+        _editorFontFamily = originalEditorFontFamily;
+        _contentFontFamily = originalContentFontFamily;
+        _editorFontSize = originalEditorFontSize;
+        _contentFontSize = originalContentFontSize;
         ApplyAppearance();
         RefreshRenderedShells();
-        StatusText.Text = $"Font changed to {_editorFontFamily}";
     }
 
     private void IncreaseFont_Click(object sender, RoutedEventArgs e)
@@ -815,6 +844,8 @@ public partial class MainWindow : Window
 
     private void ApplyAppearance()
     {
+        UpdateThemeBrushResources();
+
         Editor.FontFamily = new FontFamily(_editorFontFamily);
         Editor.FontSize = _editorFontSize;
         Editor.Foreground = BrushFromHex(_colorProfile.EditorText);
@@ -857,6 +888,22 @@ public partial class MainWindow : Window
         UpdateThemeModeMenuChecks();
         UpdateWindowMaterialMenuChecks();
         UpdateModeMenuChecks();
+    }
+
+    private void UpdateThemeBrushResources()
+    {
+        var selection = MixColors(_colorProfile.Chrome, _colorProfile.Accent, _themeMode == ThemeMode.Dark ? 0.34 : 0.16);
+        var scrollbarThumb = MixColors(_colorProfile.Surface, _colorProfile.Text, _themeMode == ThemeMode.Dark ? 0.22 : 0.16);
+        var scrollbarThumbHover = MixColors(_colorProfile.Surface, _colorProfile.Text, _themeMode == ThemeMode.Dark ? 0.30 : 0.24);
+
+        RootDock.Resources["ThemeTextBrush"] = BrushFromHex(_colorProfile.Text);
+        RootDock.Resources["ThemeMutedBrush"] = BrushFromHex(_colorProfile.Muted);
+        RootDock.Resources["ThemeLineBrush"] = BrushFromHex(_colorProfile.Line);
+        RootDock.Resources["ThemeSurfaceBrush"] = BrushFromHex(_colorProfile.Surface);
+        RootDock.Resources["ThemeChromeBrush"] = BrushFromHex(_colorProfile.Chrome);
+        RootDock.Resources["ThemeSelectionBrush"] = BrushFromHex(selection);
+        RootDock.Resources["ThemeScrollbarThumbBrush"] = BrushFromHex(scrollbarThumb);
+        RootDock.Resources["ThemeScrollbarThumbHoverBrush"] = BrushFromHex(scrollbarThumbHover);
     }
 
     private void ApplyStatusModeButtonAppearance(ToggleButton button)
@@ -5044,6 +5091,7 @@ refreshEnhancements(document);
         StatusEditorModeButton.IsEnabled = !_wysiwygMode;
         StatusSplitModeButton.IsEnabled = !_wysiwygMode;
         StatusPreviewModeButton.IsEnabled = !_wysiwygMode;
+        StatusViewButtons.Visibility = _wysiwygMode ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private async Task SetWysiwygModeAsync(bool enabled)
