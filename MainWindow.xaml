@@ -37,13 +37,32 @@
             <SolidColorBrush x:Key="ThemeLineBrush" Color="#D9E0E8" />
             <SolidColorBrush x:Key="ThemeSurfaceBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="ThemeChromeBrush" Color="#EAF3F6" />
+            <SolidColorBrush x:Key="ThemeMenuBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="ThemeSelectionBrush" Color="#DCEEFF" />
             <SolidColorBrush x:Key="ThemeScrollbarThumbBrush" Color="#B8C4D2" />
             <SolidColorBrush x:Key="ThemeScrollbarThumbHoverBrush" Color="#91A0B4" />
 
             <Style TargetType="{x:Type MenuItem}">
                 <Setter Property="Foreground" Value="{DynamicResource ThemeTextBrush}" />
+                <Setter Property="Background" Value="{DynamicResource ThemeMenuBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource ThemeMenuBrush}" />
                 <Style.Triggers>
+                    <Trigger Property="Role" Value="TopLevelHeader">
+                        <Setter Property="Background" Value="{DynamicResource ThemeChromeBrush}" />
+                        <Setter Property="BorderBrush" Value="{DynamicResource ThemeChromeBrush}" />
+                    </Trigger>
+                    <Trigger Property="Role" Value="TopLevelItem">
+                        <Setter Property="Background" Value="{DynamicResource ThemeChromeBrush}" />
+                        <Setter Property="BorderBrush" Value="{DynamicResource ThemeChromeBrush}" />
+                    </Trigger>
+                    <Trigger Property="IsHighlighted" Value="True">
+                        <Setter Property="Background" Value="{DynamicResource ThemeSelectionBrush}" />
+                        <Setter Property="BorderBrush" Value="{DynamicResource ThemeSelectionBrush}" />
+                    </Trigger>
+                    <Trigger Property="IsSubmenuOpen" Value="True">
+                        <Setter Property="Background" Value="{DynamicResource ThemeSelectionBrush}" />
+                        <Setter Property="BorderBrush" Value="{DynamicResource ThemeSelectionBrush}" />
+                    </Trigger>
                     <Trigger Property="IsEnabled" Value="False">
                         <Setter Property="Foreground" Value="{DynamicResource ThemeMutedBrush}" />
                     </Trigger>
@@ -52,7 +71,7 @@
 
             <Style TargetType="{x:Type ContextMenu}">
                 <Setter Property="Foreground" Value="{DynamicResource ThemeTextBrush}" />
-                <Setter Property="Background" Value="{DynamicResource ThemeChromeBrush}" />
+                <Setter Property="Background" Value="{DynamicResource ThemeMenuBrush}" />
                 <Setter Property="BorderBrush" Value="{DynamicResource ThemeLineBrush}" />
             </Style>
 
@@ -107,7 +126,11 @@
                 </Setter>
             </Style>
         </DockPanel.Resources>
-        <Menu x:Name="MainMenu" DockPanel.Dock="Top" Background="#EAF3F6FA" Visibility="Collapsed">
+        <Menu x:Name="MainMenu"
+              DockPanel.Dock="Top"
+              Background="#EAF3F6FA"
+              Visibility="Collapsed"
+              LostKeyboardFocus="MainMenu_LostKeyboardFocus">
             <MenuItem Header="_File">
                 <MenuItem Header="_New" InputGestureText="Ctrl+N" Click="New_Click" />
                 <MenuItem Header="_Open..." InputGestureText="Ctrl+O" Click="Open_Click" />

@@ -67,6 +67,7 @@ public partial class MainWindow : Window
     private WindowBackdropKind _windowBackdrop = WindowBackdropKind.Flat;
     private string _editorFontFamily = "Consolas";
     private double _editorFontSize = 18;
+    private double _webEditorFontSize = 18;
     private string _contentFontFamily = "Segoe UI";
     private double _contentFontSize = 20;
     private string _currentThemeId = DefaultThemeId;
@@ -433,6 +434,7 @@ public partial class MainWindow : Window
         var originalEditorFontFamily = _editorFontFamily;
         var originalContentFontFamily = _contentFontFamily;
         var originalEditorFontSize = _editorFontSize;
+        var originalWebEditorFontSize = _webEditorFontSize;
         var originalContentFontSize = _contentFontSize;
 
         var familyBox = new ComboBox
@@ -523,6 +525,7 @@ public partial class MainWindow : Window
             _editorFontFamily = string.IsNullOrWhiteSpace(selectedFamily) ? "Consolas" : selectedFamily.Trim();
             _contentFontFamily = _editorFontFamily;
             _editorFontSize = SelectedSize();
+            _webEditorFontSize = _editorFontSize;
             _contentFontSize = Math.Clamp(_editorFontSize + 2, 10, 54);
             ApplyAppearance();
             RefreshRenderedShells();
@@ -540,6 +543,7 @@ public partial class MainWindow : Window
         _editorFontFamily = originalEditorFontFamily;
         _contentFontFamily = originalContentFontFamily;
         _editorFontSize = originalEditorFontSize;
+        _webEditorFontSize = originalWebEditorFontSize;
         _contentFontSize = originalContentFontSize;
         ApplyAppearance();
         RefreshRenderedShells();
@@ -547,12 +551,12 @@ public partial class MainWindow : Window
 
     private void IncreaseFont_Click(object sender, RoutedEventArgs e)
     {
-        AdjustFontSize(1);
+        AdjustGlobalFontSize(1);
     }
 
     private void DecreaseFont_Click(object sender, RoutedEventArgs e)
     {
-        AdjustFontSize(-1);
+        AdjustGlobalFontSize(-1);
     }
 
     private void ResetFont_Click(object sender, RoutedEventArgs e)
@@ -560,6 +564,7 @@ public partial class MainWindow : Window
         _editorFontFamily = "Consolas";
         _contentFontFamily = "Segoe UI";
         _editorFontSize = 18;
+        _webEditorFontSize = 18;
         _contentFontSize = 20;
         ApplyAppearance();
         RefreshRenderedShells();
@@ -866,13 +871,41 @@ public partial class MainWindow : Window
         ApplyAppearance();
     }
 
-    private void AdjustFontSize(double delta)
+    private void AdjustGlobalFontSize(double delta)
     {
         _editorFontSize = Math.Clamp(_editorFontSize + delta, 8, 48);
+        _webEditorFontSize = Math.Clamp(_webEditorFontSize + delta, 8, 48);
         _contentFontSize = Math.Clamp(_contentFontSize + delta, 10, 54);
         ApplyAppearance();
         RefreshRenderedShells();
         StatusText.Text = $"Font size: {_editorFontSize.ToString("0.#", CultureInfo.InvariantCulture)}";
+    }
+
+    private void AdjustSourceFontSize(double delta)
+    {
+        _editorFontSize = Math.Clamp(_editorFontSize + delta, 8, 48);
+        ApplyAppearance();
+        StatusText.Text = $"Editor font size: {_editorFontSize.ToString("0.#", CultureInfo.InvariantCulture)}";
+    }
+
+    private void AdjustWebFontSize(double delta)
+    {
+        _contentFontSize = Math.Clamp(_contentFontSize + delta, 10, 54);
+        _webEditorFontSize = Math.Clamp(_webEditorFontSize + delta, 8, 48);
+        RefreshRenderedShells();
+        StatusText.Text = $"Preview font size: {_contentFontSize.ToString("0.#", CultureInfo.InvariantCulture)}";
+    }
+
+    private void AdjustFocusedFontSize(double delta)
+    {
+        if (_wysiwygMode || _viewMode == ViewMode.PreviewOnly || Preview.IsKeyboardFocusWithin || Wysiwyg.IsKeyboardFocusWithin)
+        {
+            AdjustWebFontSize(delta);
+        }
+        else
+        {
+            AdjustSourceFontSize(delta);
+        }
     }
 
     private void ApplyAppearance()
@@ -927,6 +960,9 @@ public partial class MainWindow : Window
     private void UpdateThemeBrushResources()
     {
         var selection = MixColors(_colorProfile.Chrome, _colorProfile.Accent, _themeMode == ThemeMode.Dark ? 0.34 : 0.16);
+        var menuBackground = _themeMode == ThemeMode.Dark
+            ? MixColors(_colorProfile.Page, "#000000", 0.28)
+            : _colorProfile.Surface;
         var scrollbarThumb = MixColors(_colorProfile.Surface, _colorProfile.Text, _themeMode == ThemeMode.Dark ? 0.22 : 0.16);
         var scrollbarThumbHover = MixColors(_colorProfile.Surface, _colorProfile.Text, _themeMode == ThemeMode.Dark ? 0.30 : 0.24);
 
@@ -935,39 +971,55 @@ public partial class MainWindow : Window
         RootDock.Resources["ThemeLineBrush"] = BrushFromHex(_colorProfile.Line);
         RootDock.Resources["ThemeSurfaceBrush"] = BrushFromHex(_colorProfile.Surface);
         RootDock.Resources["ThemeChromeBrush"] = BrushFromHex(_colorProfile.Chrome);
+        RootDock.Resources["ThemeMenuBrush"] = BrushFromHex(menuBackground);
         RootDock.Resources["ThemeSelectionBrush"] = BrushFromHex(selection);
         RootDock.Resources["ThemeScrollbarThumbBrush"] = BrushFromHex(scrollbarThumb);
         RootDock.Resources["ThemeScrollbarThumbHoverBrush"] = BrushFromHex(scrollbarThumbHover);
 
-        RootDock.Resources[SystemColors.MenuBrushKey] = BrushFromHex(_colorProfile.Chrome);
+        RootDock.Resources[SystemColors.MenuBrushKey] = BrushFromHex(menuBackground);
+        RootDock.Resources[SystemColors.MenuBarBrushKey] = BrushFromHex(_colorProfile.Chrome);
         RootDock.Resources[SystemColors.MenuTextBrushKey] = BrushFromHex(_colorProfile.Text);
-        RootDock.Resources[SystemColors.ControlBrushKey] = BrushFromHex(_colorProfile.Chrome);
+        RootDock.Resources[SystemColors.ControlBrushKey] = BrushFromHex(menuBackground);
+        RootDock.Resources[SystemColors.ControlDarkBrushKey] = BrushFromHex(menuBackground);
+        RootDock.Resources[SystemColors.ControlDarkDarkBrushKey] = BrushFromHex(menuBackground);
+        RootDock.Resources[SystemColors.ControlLightBrushKey] = BrushFromHex(menuBackground);
+        RootDock.Resources[SystemColors.ControlLightLightBrushKey] = BrushFromHex(menuBackground);
         RootDock.Resources[SystemColors.ControlTextBrushKey] = BrushFromHex(_colorProfile.Text);
         RootDock.Resources[SystemColors.HighlightBrushKey] = BrushFromHex(selection);
         RootDock.Resources[SystemColors.HighlightTextBrushKey] = BrushFromHex(_colorProfile.Text);
-        RootDock.Resources[SystemColors.WindowBrushKey] = BrushFromHex(_colorProfile.Surface);
+        RootDock.Resources[SystemColors.WindowBrushKey] = BrushFromHex(menuBackground);
         RootDock.Resources[SystemColors.WindowTextBrushKey] = BrushFromHex(_colorProfile.Text);
         RootDock.Resources[SystemColors.GrayTextBrushKey] = BrushFromHex(_colorProfile.Muted);
 
-        Resources[SystemColors.MenuBrushKey] = BrushFromHex(_colorProfile.Chrome);
+        Resources[SystemColors.MenuBrushKey] = BrushFromHex(menuBackground);
+        Resources[SystemColors.MenuBarBrushKey] = BrushFromHex(_colorProfile.Chrome);
         Resources[SystemColors.MenuTextBrushKey] = BrushFromHex(_colorProfile.Text);
-        Resources[SystemColors.ControlBrushKey] = BrushFromHex(_colorProfile.Chrome);
+        Resources[SystemColors.ControlBrushKey] = BrushFromHex(menuBackground);
+        Resources[SystemColors.ControlDarkBrushKey] = BrushFromHex(menuBackground);
+        Resources[SystemColors.ControlDarkDarkBrushKey] = BrushFromHex(menuBackground);
+        Resources[SystemColors.ControlLightBrushKey] = BrushFromHex(menuBackground);
+        Resources[SystemColors.ControlLightLightBrushKey] = BrushFromHex(menuBackground);
         Resources[SystemColors.ControlTextBrushKey] = BrushFromHex(_colorProfile.Text);
         Resources[SystemColors.HighlightBrushKey] = BrushFromHex(selection);
         Resources[SystemColors.HighlightTextBrushKey] = BrushFromHex(_colorProfile.Text);
-        Resources[SystemColors.WindowBrushKey] = BrushFromHex(_colorProfile.Surface);
+        Resources[SystemColors.WindowBrushKey] = BrushFromHex(menuBackground);
         Resources[SystemColors.WindowTextBrushKey] = BrushFromHex(_colorProfile.Text);
         Resources[SystemColors.GrayTextBrushKey] = BrushFromHex(_colorProfile.Muted);
 
         if (Application.Current is not null)
         {
-            Application.Current.Resources[SystemColors.MenuBrushKey] = BrushFromHex(_colorProfile.Chrome);
+            Application.Current.Resources[SystemColors.MenuBrushKey] = BrushFromHex(menuBackground);
+            Application.Current.Resources[SystemColors.MenuBarBrushKey] = BrushFromHex(_colorProfile.Chrome);
             Application.Current.Resources[SystemColors.MenuTextBrushKey] = BrushFromHex(_colorProfile.Text);
-            Application.Current.Resources[SystemColors.ControlBrushKey] = BrushFromHex(_colorProfile.Chrome);
+            Application.Current.Resources[SystemColors.ControlBrushKey] = BrushFromHex(menuBackground);
+            Application.Current.Resources[SystemColors.ControlDarkBrushKey] = BrushFromHex(menuBackground);
+            Application.Current.Resources[SystemColors.ControlDarkDarkBrushKey] = BrushFromHex(menuBackground);
+            Application.Current.Resources[SystemColors.ControlLightBrushKey] = BrushFromHex(menuBackground);
+            Application.Current.Resources[SystemColors.ControlLightLightBrushKey] = BrushFromHex(menuBackground);
             Application.Current.Resources[SystemColors.ControlTextBrushKey] = BrushFromHex(_colorProfile.Text);
             Application.Current.Resources[SystemColors.HighlightBrushKey] = BrushFromHex(selection);
             Application.Current.Resources[SystemColors.HighlightTextBrushKey] = BrushFromHex(_colorProfile.Text);
-            Application.Current.Resources[SystemColors.WindowBrushKey] = BrushFromHex(_colorProfile.Surface);
+            Application.Current.Resources[SystemColors.WindowBrushKey] = BrushFromHex(menuBackground);
             Application.Current.Resources[SystemColors.WindowTextBrushKey] = BrushFromHex(_colorProfile.Text);
             Application.Current.Resources[SystemColors.GrayTextBrushKey] = BrushFromHex(_colorProfile.Muted);
         }
@@ -1011,6 +1063,38 @@ public partial class MainWindow : Window
         {
             MainMenu.Focus();
         }
+    }
+
+    private void MainMenu_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (!_menuBarHidden)
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_menuBarHidden && MainMenu.Visibility == Visibility.Visible && !MainMenu.IsKeyboardFocusWithin && !HasOpenSubmenu(MainMenu))
+            {
+                MainMenu.Visibility = Visibility.Collapsed;
+            }
+        }, DispatcherPriority.ContextIdle);
+    }
+
+    private static bool HasOpenSubmenu(ItemsControl item)
+    {
+        foreach (var child in item.Items.OfType<object>())
+        {
+            if (item.ItemContainerGenerator.ContainerFromItem(child) is MenuItem menuItem)
+            {
+                if (menuItem.IsSubmenuOpen || HasOpenSubmenu(menuItem))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private void RefreshRenderedShells()
@@ -1557,12 +1641,12 @@ public partial class MainWindow : Window
         }
         else if (Keyboard.Modifiers == ModifierKeys.Control && (e.Key == Key.OemPlus || e.Key == Key.Add))
         {
-            IncreaseFont_Click(sender, e);
+            AdjustFocusedFontSize(1);
             e.Handled = true;
         }
         else if (Keyboard.Modifiers == ModifierKeys.Control && (e.Key == Key.OemMinus || e.Key == Key.Subtract))
         {
-            DecreaseFont_Click(sender, e);
+            AdjustFocusedFontSize(-1);
             e.Handled = true;
         }
         else if (e.Key == Key.F3)
@@ -2098,7 +2182,7 @@ public partial class MainWindow : Window
 
     private string ContentFontSizeCss => _contentFontSize.ToString("0.###", CultureInfo.InvariantCulture);
 
-    private string EditorFontSizeCss => _editorFontSize.ToString("0.###", CultureInfo.InvariantCulture);
+    private string EditorFontSizeCss => _webEditorFontSize.ToString("0.###", CultureInfo.InvariantCulture);
 
     private string ColorSchemeCss => _themeMode == ThemeMode.Dark ? "dark" : "light";
 
@@ -5321,6 +5405,11 @@ refreshEnhancements(document);
 
         if (HandleWebZoomMessage(message?.Type))
         {
+            if (message?.Markdown is not null)
+            {
+                UpdateTextFromWysiwyg(message.Markdown);
+            }
+
             return;
         }
 
@@ -5374,13 +5463,13 @@ refreshEnhancements(document);
     {
         if (string.Equals(type, "zoomIn", StringComparison.OrdinalIgnoreCase))
         {
-            AdjustFontSize(1);
+            AdjustWebFontSize(1);
             return true;
         }
 
         if (string.Equals(type, "zoomOut", StringComparison.OrdinalIgnoreCase))
         {
-            AdjustFontSize(-1);
+            AdjustWebFontSize(-1);
             return true;
         }
 
