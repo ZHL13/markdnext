@@ -19,6 +19,17 @@
         SourceInitialized="Window_SourceInitialized"
         Icon="Logo.png"
         Background="Transparent">
+    <Window.Resources>
+        <SolidColorBrush x:Key="{x:Static SystemColors.MenuBrushKey}" Color="#EAF3F6" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.MenuTextBrushKey}" Color="#1F2933" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}" Color="#EAF3F6" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.ControlTextBrushKey}" Color="#1F2933" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#DCEEFF" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#1F2933" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.WindowBrushKey}" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.WindowTextBrushKey}" Color="#1F2933" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.GrayTextBrushKey}" Color="#5D6978" />
+    </Window.Resources>
     <DockPanel x:Name="RootDock" Background="#DDF6F7F9">
         <DockPanel.Resources>
             <SolidColorBrush x:Key="ThemeTextBrush" Color="#1F2933" />
@@ -96,7 +107,7 @@
                 </Setter>
             </Style>
         </DockPanel.Resources>
-        <Menu x:Name="MainMenu" DockPanel.Dock="Top" Background="#EAF3F6FA">
+        <Menu x:Name="MainMenu" DockPanel.Dock="Top" Background="#EAF3F6FA" Visibility="Collapsed">
             <MenuItem Header="_File">
                 <MenuItem Header="_New" InputGestureText="Ctrl+N" Click="New_Click" />
                 <MenuItem Header="_Open..." InputGestureText="Ctrl+O" Click="Open_Click" />
@@ -129,6 +140,7 @@
                 <MenuItem x:Name="WysiwygModeMenuItem" Header="_WYSIWYG" IsCheckable="True" Click="WysiwygMode_Click" />
                 <MenuItem x:Name="ViewBothMenuItem" Header="_Split View" IsCheckable="True" IsChecked="True" Click="SplitMode_Click" />
                 <MenuItem x:Name="ViewPreviewMenuItem" Header="_Preview Only" IsCheckable="True" Click="PreviewMode_Click" />
+                <MenuItem x:Name="HideMenuBarMenuItem" Header="_Hide Menu Bar" IsCheckable="True" IsChecked="True" Click="HideMenuBar_Click" />
                 <Separator />
                 <MenuItem x:Name="WordWrapMenuItem" Header="_Word Wrap" IsCheckable="True" IsChecked="True" Click="WordWrap_Click" />
                 <Separator />
@@ -274,7 +286,7 @@
                 <Grid>
                     <avalon:TextEditor x:Name="Editor"
                                        FontFamily="Consolas"
-                                       FontSize="14"
+                                       FontSize="18"
                                        Background="#00FFFFFF"
                                        Foreground="#182433"
                                        BorderThickness="0"

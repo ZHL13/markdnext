@@ -61,14 +61,16 @@ public partial class MainWindow : Window
     private bool _previewFailed;
     private bool _wysiwygMode;
     private bool _automaticCompletionEnabled;
+    private bool _menuBarHidden = true;
     private ViewMode _viewMode = ViewMode.Both;
     private ViewMode _viewModeBeforeWysiwyg = ViewMode.Both;
     private WindowBackdropKind _windowBackdrop = WindowBackdropKind.Flat;
     private string _editorFontFamily = "Consolas";
-    private double _editorFontSize = 14;
+    private double _editorFontSize = 18;
     private string _contentFontFamily = "Segoe UI";
-    private double _contentFontSize = 16;
+    private double _contentFontSize = 20;
     private string _currentThemeId = DefaultThemeId;
+    private string _linkColor = "#376f99";
     private ThemeMode _themeMode = ThemeMode.Normal;
     private ColorProfile _colorProfile = ColorProfile.Default;
 
@@ -137,6 +139,10 @@ public partial class MainWindow : Window
         {
             await Preview.EnsureCoreWebView2Async();
             Preview.CoreWebView2.Settings.IsStatusBarEnabled = false;
+            Preview.CoreWebView2.Settings.IsZoomControlEnabled = false;
+            Preview.CoreWebView2.Settings.IsPinchZoomEnabled = false;
+            Preview.ZoomFactor = 1.0;
+            Preview.ZoomFactorChanged += WebView_ZoomFactorChanged;
             Preview.CoreWebView2.NavigationStarting += Preview_NavigationStarting;
             Preview.CoreWebView2.WebMessageReceived += Preview_WebMessageReceived;
             ConfigureDocumentResourceHandler(Preview.CoreWebView2);
@@ -159,6 +165,10 @@ public partial class MainWindow : Window
         {
             await Wysiwyg.EnsureCoreWebView2Async();
             Wysiwyg.CoreWebView2.Settings.IsStatusBarEnabled = false;
+            Wysiwyg.CoreWebView2.Settings.IsZoomControlEnabled = false;
+            Wysiwyg.CoreWebView2.Settings.IsPinchZoomEnabled = false;
+            Wysiwyg.ZoomFactor = 1.0;
+            Wysiwyg.ZoomFactorChanged += WebView_ZoomFactorChanged;
             Wysiwyg.CoreWebView2.NavigationStarting += Preview_NavigationStarting;
             Wysiwyg.CoreWebView2.WebMessageReceived += Wysiwyg_WebMessageReceived;
             ConfigureDocumentResourceHandler(Wysiwyg.CoreWebView2);
@@ -169,6 +179,14 @@ public partial class MainWindow : Window
         {
             _wysiwygReady = false;
             Debug.WriteLine(ex);
+        }
+    }
+
+    private void WebView_ZoomFactorChanged(object? sender, EventArgs e)
+    {
+        if (sender is WpfWebView2 webView && Math.Abs(webView.ZoomFactor - 1.0) > 0.001)
+        {
+            webView.ZoomFactor = 1.0;
         }
     }
 
@@ -399,6 +417,12 @@ public partial class MainWindow : Window
         await SetWysiwygModeAsync(true);
     }
 
+    private void HideMenuBar_Click(object sender, RoutedEventArgs e)
+    {
+        _menuBarHidden = HideMenuBarMenuItem.IsChecked;
+        UpdateMenuBarVisibility();
+    }
+
     private void WordWrap_Click(object sender, RoutedEventArgs e)
     {
         Editor.WordWrap = WordWrapMenuItem.IsChecked;
@@ -535,8 +559,8 @@ public partial class MainWindow : Window
     {
         _editorFontFamily = "Consolas";
         _contentFontFamily = "Segoe UI";
-        _editorFontSize = 14;
-        _contentFontSize = 16;
+        _editorFontSize = 18;
+        _contentFontSize = 20;
         ApplyAppearance();
         RefreshRenderedShells();
         StatusText.Text = "Font reset.";
@@ -566,6 +590,7 @@ public partial class MainWindow : Window
 
             _colorProfile = profile.Normalized();
             _currentThemeId = string.Empty;
+            _linkColor = LinkColorFromProfile(_colorProfile, _themeMode);
             ApplyAppearance();
             RefreshRenderedShells();
             StatusText.Text = $"Loaded color profile {Path.GetFileName(dialog.FileName)}";
@@ -614,6 +639,7 @@ public partial class MainWindow : Window
         var originalThemeId = _currentThemeId;
         var originalMode = _themeMode;
         var originalProfile = _colorProfile;
+        var originalLinkColor = _linkColor;
 
         var list = new ListBox
         {
@@ -723,6 +749,7 @@ public partial class MainWindow : Window
         _currentThemeId = originalThemeId;
         _themeMode = originalMode;
         _colorProfile = originalProfile;
+        _linkColor = originalLinkColor;
         ApplyAppearance();
         RefreshRenderedShells();
     }
@@ -788,7 +815,9 @@ public partial class MainWindow : Window
 
     private void ApplySelectedTheme()
     {
-        _colorProfile = GetThemeProfile(FindTheme(_currentThemeId), _themeMode).Normalized();
+        var theme = FindTheme(_currentThemeId);
+        _colorProfile = GetThemeProfile(theme, _themeMode).Normalized();
+        _linkColor = GetThemeLinkColor(theme, _themeMode);
         ApplyAppearance();
         RefreshRenderedShells();
     }
@@ -802,6 +831,11 @@ public partial class MainWindow : Window
     private static ColorProfile GetThemeProfile(ThemeDefinition theme, ThemeMode mode)
     {
         return mode == ThemeMode.Dark ? theme.Dark : theme.Light;
+    }
+
+    private static string GetThemeLinkColor(ThemeDefinition theme, ThemeMode mode)
+    {
+        return mode == ThemeMode.Dark ? theme.DarkLink : theme.LightLink;
     }
 
     private static string ThemeModeLabel(ThemeMode mode)
@@ -874,7 +908,7 @@ public partial class MainWindow : Window
 
         _markdownColorizer.ApplyTheme(
             _colorProfile.Heading,
-            _colorProfile.Accent,
+            _linkColor,
             _colorProfile.Muted,
             _colorProfile.Accent,
             _colorProfile.Heading,
@@ -887,6 +921,7 @@ public partial class MainWindow : Window
         UpdateThemeModeMenuChecks();
         UpdateWindowMaterialMenuChecks();
         UpdateModeMenuChecks();
+        UpdateMenuBarVisibility();
     }
 
     private void UpdateThemeBrushResources()
@@ -913,6 +948,29 @@ public partial class MainWindow : Window
         RootDock.Resources[SystemColors.WindowBrushKey] = BrushFromHex(_colorProfile.Surface);
         RootDock.Resources[SystemColors.WindowTextBrushKey] = BrushFromHex(_colorProfile.Text);
         RootDock.Resources[SystemColors.GrayTextBrushKey] = BrushFromHex(_colorProfile.Muted);
+
+        Resources[SystemColors.MenuBrushKey] = BrushFromHex(_colorProfile.Chrome);
+        Resources[SystemColors.MenuTextBrushKey] = BrushFromHex(_colorProfile.Text);
+        Resources[SystemColors.ControlBrushKey] = BrushFromHex(_colorProfile.Chrome);
+        Resources[SystemColors.ControlTextBrushKey] = BrushFromHex(_colorProfile.Text);
+        Resources[SystemColors.HighlightBrushKey] = BrushFromHex(selection);
+        Resources[SystemColors.HighlightTextBrushKey] = BrushFromHex(_colorProfile.Text);
+        Resources[SystemColors.WindowBrushKey] = BrushFromHex(_colorProfile.Surface);
+        Resources[SystemColors.WindowTextBrushKey] = BrushFromHex(_colorProfile.Text);
+        Resources[SystemColors.GrayTextBrushKey] = BrushFromHex(_colorProfile.Muted);
+
+        if (Application.Current is not null)
+        {
+            Application.Current.Resources[SystemColors.MenuBrushKey] = BrushFromHex(_colorProfile.Chrome);
+            Application.Current.Resources[SystemColors.MenuTextBrushKey] = BrushFromHex(_colorProfile.Text);
+            Application.Current.Resources[SystemColors.ControlBrushKey] = BrushFromHex(_colorProfile.Chrome);
+            Application.Current.Resources[SystemColors.ControlTextBrushKey] = BrushFromHex(_colorProfile.Text);
+            Application.Current.Resources[SystemColors.HighlightBrushKey] = BrushFromHex(selection);
+            Application.Current.Resources[SystemColors.HighlightTextBrushKey] = BrushFromHex(_colorProfile.Text);
+            Application.Current.Resources[SystemColors.WindowBrushKey] = BrushFromHex(_colorProfile.Surface);
+            Application.Current.Resources[SystemColors.WindowTextBrushKey] = BrushFromHex(_colorProfile.Text);
+            Application.Current.Resources[SystemColors.GrayTextBrushKey] = BrushFromHex(_colorProfile.Muted);
+        }
     }
 
     private void ApplyStatusModeButtonAppearance(ToggleButton button)
@@ -933,6 +991,26 @@ public partial class MainWindow : Window
         MicaMaterialMenuItem.IsChecked = _windowBackdrop == WindowBackdropKind.Mica;
         AcrylicMaterialMenuItem.IsChecked = _windowBackdrop == WindowBackdropKind.Acrylic;
         FlatMaterialMenuItem.IsChecked = _windowBackdrop == WindowBackdropKind.Flat;
+    }
+
+    private void UpdateMenuBarVisibility()
+    {
+        HideMenuBarMenuItem.IsChecked = _menuBarHidden;
+        MainMenu.Visibility = _menuBarHidden ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void ToggleTemporaryMenuBar()
+    {
+        if (!_menuBarHidden)
+        {
+            return;
+        }
+
+        MainMenu.Visibility = MainMenu.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+        if (MainMenu.Visibility == Visibility.Visible)
+        {
+            MainMenu.Focus();
+        }
     }
 
     private void RefreshRenderedShells()
@@ -1432,7 +1510,12 @@ public partial class MainWindow : Window
 
     private void Window_KeyDown(object sender, KeyEventArgs e)
     {
-        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.N)
+        if (_menuBarHidden && (e.Key == Key.F10 || e.SystemKey == Key.F10 || e.SystemKey == Key.LeftAlt || e.SystemKey == Key.RightAlt))
+        {
+            ToggleTemporaryMenuBar();
+            e.Handled = true;
+        }
+        else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.N)
         {
             New_Click(sender, e);
             e.Handled = true;
@@ -2051,6 +2134,7 @@ public partial class MainWindow : Window
   --line: {{_colorProfile.Line}};
   --code: {{_colorProfile.Code}};
   --accent: {{_colorProfile.Accent}};
+  --link: {{_linkColor}};
   --surface: {{_colorProfile.Surface}};
   --quote-bg: {{_colorProfile.QuoteBackground}};
   --heading: {{_colorProfile.Heading}};
@@ -2113,7 +2197,7 @@ html, body {
   margin-bottom: 1em;
 }
 .markdown-body a {
-  color: var(--accent);
+  color: var(--link);
   text-decoration: none;
 }
 .markdown-body a:hover { text-decoration: underline; }
@@ -2286,6 +2370,36 @@ html, body {
 <script src="https://{{AssetHost}}/katex/katex.min.js"></script>
 <script nonce="{{nonce}}">
 let previewRenderToken = 0;
+
+function postZoom(type) {
+  if (window.chrome && window.chrome.webview) {
+    window.chrome.webview.postMessage({ type: type });
+  }
+}
+
+document.addEventListener('wheel', function (event) {
+  if (!event.ctrlKey) return;
+  event.preventDefault();
+  event.stopPropagation();
+  postZoom(event.deltaY < 0 ? 'zoomIn' : 'zoomOut');
+}, { capture: true, passive: false });
+
+document.addEventListener('keydown', function (event) {
+  if (!event.ctrlKey && !event.metaKey) return;
+  const key = event.key || '';
+  if (key === '+' || key === '=' || key === 'Add') {
+    event.preventDefault();
+    event.stopPropagation();
+    postZoom('zoomIn');
+  } else if (key === '-' || key === '_' || key === 'Subtract') {
+    event.preventDefault();
+    event.stopPropagation();
+    postZoom('zoomOut');
+  } else if (key === '0') {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+}, true);
 
 function highlightCode(root) {
   if (!window.hljs) return;
@@ -2995,6 +3109,7 @@ window.mdvSetPreview = async function (html, sourceLine) {
   --line: {{_colorProfile.Line}};
   --code: {{_colorProfile.Code}};
   --accent: {{_colorProfile.Accent}};
+  --link: {{_linkColor}};
   --surface: {{_colorProfile.Surface}};
   --quote-bg: {{_colorProfile.QuoteBackground}};
   --heading: {{_colorProfile.Heading}};
@@ -3062,6 +3177,13 @@ html, body {
   padding: .1em 1em;
   margin-left: 0;
   background: var(--quote-bg);
+}
+.md-rendered a {
+  color: var(--link);
+  text-decoration: none;
+}
+.md-rendered a:hover {
+  text-decoration: underline;
 }
 .md-rendered code,
 .raw-editor {
@@ -3421,11 +3543,35 @@ function post(type) {
   window.chrome.webview.postMessage({ type: type, markdown: markdownText() });
 }
 
+function postZoom(type) {
+  if (window.chrome && window.chrome.webview) {
+    window.chrome.webview.postMessage({ type: type, markdown: markdownText() });
+  }
+}
+
+document.addEventListener('wheel', function (event) {
+  if (!event.ctrlKey) return;
+  event.preventDefault();
+  event.stopPropagation();
+  postZoom(event.deltaY < 0 ? 'zoomIn' : 'zoomOut');
+}, { capture: true, passive: false });
+
 document.addEventListener('keydown', function (event) {
   const key = (event.key || '').toLowerCase();
   const command = event.ctrlKey || event.metaKey;
   if (!command || event.altKey) return;
-  if (key === 'z' && !event.shiftKey) {
+  if (key === '+' || key === '=' || key === 'add') {
+    event.preventDefault();
+    event.stopPropagation();
+    postZoom('zoomIn');
+  } else if (key === '-' || key === '_' || key === 'subtract') {
+    event.preventDefault();
+    event.stopPropagation();
+    postZoom('zoomOut');
+  } else if (key === '0') {
+    event.preventDefault();
+    event.stopPropagation();
+  } else if (key === 'z' && !event.shiftKey) {
     event.preventDefault();
     event.stopPropagation();
     post('undo');
@@ -5173,6 +5319,11 @@ refreshEnhancements(document);
             return;
         }
 
+        if (HandleWebZoomMessage(message?.Type))
+        {
+            return;
+        }
+
         if (string.Equals(message?.Type, "redo", StringComparison.OrdinalIgnoreCase))
         {
             _ = RedoWysiwygAsync(message!.Markdown);
@@ -5203,6 +5354,11 @@ refreshEnhancements(document);
             return;
         }
 
+        if (HandleWebZoomMessage(message?.Type))
+        {
+            return;
+        }
+
         if (message is null
             || !string.Equals(message.Type, "previewTask", StringComparison.OrdinalIgnoreCase)
             || message.TaskIndex is null
@@ -5212,6 +5368,23 @@ refreshEnhancements(document);
         }
 
         ToggleTaskCheckbox(message.TaskIndex.Value, message.Checked.Value);
+    }
+
+    private bool HandleWebZoomMessage(string? type)
+    {
+        if (string.Equals(type, "zoomIn", StringComparison.OrdinalIgnoreCase))
+        {
+            AdjustFontSize(1);
+            return true;
+        }
+
+        if (string.Equals(type, "zoomOut", StringComparison.OrdinalIgnoreCase))
+        {
+            AdjustFontSize(-1);
+            return true;
+        }
+
+        return false;
     }
 
     private void ToggleTaskCheckbox(int taskIndex, bool isChecked)
@@ -5700,7 +5873,7 @@ refreshEnhancements(document);
 
     private sealed record ImageSegment(string Placeholder, string Alt, string Target, string? Title);
 
-    private sealed record ThemeDefinition(string Id, string DisplayName, ColorProfile Light, ColorProfile Dark);
+    private sealed record ThemeDefinition(string Id, string DisplayName, ColorProfile Light, ColorProfile Dark, string LightLink, string DarkLink);
 
     private sealed record ThemeFile(ThemePalette Dark, ThemePalette Light);
 
@@ -5747,11 +5920,15 @@ refreshEnhancements(document);
 
                 var fileName = normalized.Split('/').Last();
                 var id = Path.GetFileNameWithoutExtension(fileName).ToLowerInvariant();
+                var lightProfile = ColorProfileFromPalette(themeFile.Light, false).Normalized();
+                var darkProfile = ColorProfileFromPalette(themeFile.Dark, true).Normalized();
                 themes.Add(new ThemeDefinition(
                     id,
                     ThemeDisplayName(id),
-                    ColorProfileFromPalette(themeFile.Light, false).Normalized(),
-                    ColorProfileFromPalette(themeFile.Dark, true).Normalized()));
+                    lightProfile,
+                    darkProfile,
+                    LinkColorFromPalette(themeFile.Light, false),
+                    LinkColorFromPalette(themeFile.Dark, true)));
             }
             catch (Exception ex)
             {
@@ -5781,7 +5958,9 @@ refreshEnhancements(document);
                 "#202734",
                 "#171a1f",
                 "#e7edf5",
-                "#202734"));
+                "#202734"),
+            "#376f99",
+            "#7fa7c7");
     }
 
     private static string ThemeDisplayName(string id)
@@ -5830,6 +6009,24 @@ refreshEnhancements(document);
             background,
             foreground,
             quoteBackground);
+    }
+
+    private static string LinkColorFromPalette(ThemePalette palette, bool dark)
+    {
+        var background = NormalizeThemeColor(palette.Background, dark ? "#1f2329" : "#ffffff");
+        var foreground = NormalizeThemeColor(palette.Foreground, dark ? "#e5e7eb" : "#1f2933");
+        var rawLink = NormalizeThemeColor(string.IsNullOrWhiteSpace(palette.Link) ? palette.Accent : palette.Link, "#1769aa");
+
+        return dark
+            ? MixColors(background, rawLink, 0.68)
+            : MixColors(foreground, rawLink, 0.62);
+    }
+
+    private static string LinkColorFromProfile(ColorProfile profile, ThemeMode mode)
+    {
+        return mode == ThemeMode.Dark
+            ? MixColors(profile.Page, profile.Accent, 0.68)
+            : MixColors(profile.Text, profile.Accent, 0.62);
     }
 
     private static string NormalizeThemeColor(string? value, string fallback)
