@@ -3374,6 +3374,12 @@ window.mdvSetPreview = async function (html, sourceLine) {
 
             if (!Uri.TryCreate(source, UriKind.Absolute, out _))
             {
+                var localPath = ResolveDocumentRelativePath(source);
+                if (localPath is not null && File.Exists(localPath) && IsImageFile(localPath))
+                {
+                    return BuildLocalImageResourceUri(localPath);
+                }
+
                 return BuildDocumentResourceUri(normalized);
             }
         }
@@ -3382,6 +3388,27 @@ window.mdvSetPreview = async function (html, sourceLine) {
         }
 
         return normalized;
+    }
+
+    private string? ResolveDocumentRelativePath(string source)
+    {
+        var clean = source.Split('#', 2)[0].Split('?', 2)[0];
+        clean = UnescapeImageSource(clean)
+            .Replace('/', Path.DirectorySeparatorChar)
+            .Replace('\\', Path.DirectorySeparatorChar);
+        if (string.IsNullOrWhiteSpace(clean) || Path.IsPathFullyQualified(clean))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Path.GetFullPath(Path.Combine(GetDocumentBaseFolder(), clean));
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string UnescapeImageSource(string source)
