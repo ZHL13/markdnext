@@ -115,6 +115,7 @@ public partial class MainWindow : Window
         };
         Editor.TextArea.TextEntered += Editor_TextArea_TextEntered;
         Editor.TextArea.PreviewKeyDown += Editor_TextArea_PreviewKeyDown;
+        Editor.PreviewMouseWheel += Editor_PreviewMouseWheel;
         Editor.TextArea.TextView.LineTransformers.Add(_markdownColorizer);
     }
 
@@ -144,6 +145,7 @@ public partial class MainWindow : Window
             Preview.CoreWebView2.Settings.IsZoomControlEnabled = true;
             Preview.CoreWebView2.Settings.IsPinchZoomEnabled = true;
             Preview.ZoomFactor = _webViewDefaultZoom;
+            Preview.ZoomFactorChanged += WebView_ZoomFactorChanged;
             Preview.CoreWebView2.NavigationStarting += Preview_NavigationStarting;
             Preview.CoreWebView2.WebMessageReceived += Preview_WebMessageReceived;
             ConfigureDocumentResourceHandler(Preview.CoreWebView2);
@@ -169,6 +171,7 @@ public partial class MainWindow : Window
             Wysiwyg.CoreWebView2.Settings.IsZoomControlEnabled = true;
             Wysiwyg.CoreWebView2.Settings.IsPinchZoomEnabled = true;
             Wysiwyg.ZoomFactor = _webViewDefaultZoom;
+            Wysiwyg.ZoomFactorChanged += WebView_ZoomFactorChanged;
             Wysiwyg.CoreWebView2.NavigationStarting += Preview_NavigationStarting;
             Wysiwyg.CoreWebView2.WebMessageReceived += Wysiwyg_WebMessageReceived;
             ConfigureDocumentResourceHandler(Wysiwyg.CoreWebView2);
@@ -179,6 +182,14 @@ public partial class MainWindow : Window
         {
             _wysiwygReady = false;
             Debug.WriteLine(ex);
+        }
+    }
+
+    private void WebView_ZoomFactorChanged(object? sender, EventArgs e)
+    {
+        if (sender is WpfWebView2 webView)
+        {
+            ApplyWebViewLayoutZoomFactor(webView);
         }
     }
 
@@ -437,6 +448,10 @@ public partial class MainWindow : Window
             Margin = new Thickness(0, 4, 0, 10),
             IsTextSearchEnabled = true
         };
+        if (RootDock.TryFindResource("ThemedComboBoxStyle") is Style comboBoxStyle)
+        {
+            familyBox.Style = comboBoxStyle;
+        }
 
         foreach (var family in Fonts.SystemFontFamilies.OrderBy(f => f.Source, StringComparer.CurrentCultureIgnoreCase))
         {
@@ -535,6 +550,8 @@ public partial class MainWindow : Window
             familyBox.Resources[SystemColors.ControlTextBrushKey] = text;
             familyBox.Resources[SystemColors.HighlightBrushKey] = BrushFromHex(MenuHighlightColor());
             familyBox.Resources[SystemColors.HighlightTextBrushKey] = text;
+            familyBox.Resources["ThemeMenuHighlightBrush"] = BrushFromHex(MenuHighlightColor());
+            familyBox.Resources["ThemeMutedBrush"] = muted;
 
             foreach (var label in panel.Children.OfType<TextBlock>())
             {
@@ -1096,18 +1113,6 @@ public partial class MainWindow : Window
         SetWebViewZoom(webView, webView.ZoomFactor + delta, updateDefault: false);
     }
 
-    private void AdjustFocusedFontSize(double delta)
-    {
-        if (_wysiwygMode || _viewMode == ViewMode.PreviewOnly || Preview.IsKeyboardFocusWithin || Wysiwyg.IsKeyboardFocusWithin)
-        {
-            AdjustWebViewZoom(delta * 0.1);
-        }
-        else
-        {
-            AdjustSourceFontSize(delta);
-        }
-    }
-
     private WpfWebView2? FocusedWebView()
     {
         if (Wysiwyg.Visibility == Visibility.Visible && Wysiwyg.IsKeyboardFocusWithin)
@@ -1138,12 +1143,26 @@ public partial class MainWindow : Window
 
         var zoom = Math.Clamp(zoomFactor, 0.25, 5.0);
         webView.ZoomFactor = zoom;
+        ApplyWebViewLayoutZoomFactor(webView);
         if (updateDefault)
         {
             _webViewDefaultZoom = zoom;
         }
 
         StatusText.Text = $"WebView zoom: {(zoom * 100).ToString("0", CultureInfo.InvariantCulture)}%";
+    }
+
+    private void ApplyWebViewLayoutZoomFactor(WpfWebView2 webView)
+    {
+        if (webView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        var zoom = Math.Clamp(webView.ZoomFactor, 0.25, 5.0);
+        var zoomText = zoom.ToString("0.###", CultureInfo.InvariantCulture);
+        _ = webView.CoreWebView2.ExecuteScriptAsync(
+            $"window.mdvSetWebViewZoomFactor && window.mdvSetWebViewZoomFactor({zoomText});");
     }
 
     private void ApplyAppearance()
@@ -1197,7 +1216,9 @@ public partial class MainWindow : Window
 
     private string EditorLinkColor()
     {
-        return MixColors(_linkColor, _colorProfile.Muted, _themeMode == ThemeMode.Dark ? 0.48 : 0.38);
+        return _themeMode == ThemeMode.Dark
+            ? MixColors(_colorProfile.EditorBackground, _linkColor, 0.58)
+            : MixColors(_colorProfile.EditorText, _linkColor, 0.42);
     }
 
     private string MenuBackgroundColor()
@@ -1506,6 +1527,17 @@ public partial class MainWindow : Window
             ShowCompletionWindow(replaceActivationText: true);
             e.Handled = true;
         }
+    }
+
+    private void Editor_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.Control)
+        {
+            return;
+        }
+
+        AdjustWebViewZoom(e.Delta > 0 ? 0.1 : -0.1);
+        e.Handled = true;
     }
 
     private bool TryHandleSourceListEnter()
@@ -1907,14 +1939,14 @@ public partial class MainWindow : Window
             Redo_Click(sender, e);
             e.Handled = true;
         }
-        else if (Keyboard.Modifiers == ModifierKeys.Control && (e.Key == Key.OemPlus || e.Key == Key.Add))
+        else if (IsControlZoomModifier() && (e.Key == Key.OemPlus || e.Key == Key.Add))
         {
-            AdjustFocusedFontSize(1);
+            AdjustWebViewZoom(0.1);
             e.Handled = true;
         }
-        else if (Keyboard.Modifiers == ModifierKeys.Control && (e.Key == Key.OemMinus || e.Key == Key.Subtract))
+        else if (IsControlZoomModifier() && (e.Key == Key.OemMinus || e.Key == Key.Subtract))
         {
-            AdjustFocusedFontSize(-1);
+            AdjustWebViewZoom(-0.1);
             e.Handled = true;
         }
         else if (e.Key == Key.F3)
@@ -1937,6 +1969,12 @@ public partial class MainWindow : Window
             Print_Click(sender, e);
             e.Handled = true;
         }
+    }
+
+    private static bool IsControlZoomModifier()
+    {
+        return Keyboard.Modifiers == ModifierKeys.Control
+            || Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift);
     }
 
     private async void FindTextBox_KeyDown(object sender, KeyEventArgs e)
@@ -2375,6 +2413,7 @@ public partial class MainWindow : Window
         }
 
         await NavigateToStringAsync(Preview, BuildPreviewDocument());
+        ApplyWebViewLayoutZoomFactor(Preview);
         _previewShellReady = true;
     }
 
@@ -2401,6 +2440,7 @@ public partial class MainWindow : Window
         }
 
         await NavigateToStringAsync(Wysiwyg, BuildWysiwygDocument());
+        ApplyWebViewLayoutZoomFactor(Wysiwyg);
         _wysiwygShellReady = true;
     }
 
@@ -2452,6 +2492,8 @@ public partial class MainWindow : Window
 
     private string EditorFontSizeCss => _webEditorFontSize.ToString("0.###", CultureInfo.InvariantCulture);
 
+    private string WebViewZoomCss => _webViewDefaultZoom.ToString("0.###", CultureInfo.InvariantCulture);
+
     private string ColorSchemeCss => _themeMode == ThemeMode.Dark ? "dark" : "light";
 
     private static string CssFontFamily(string family, string fallback)
@@ -2490,6 +2532,7 @@ public partial class MainWindow : Window
   --surface: {{_colorProfile.Surface}};
   --quote-bg: {{_colorProfile.QuoteBackground}};
   --heading: {{_colorProfile.Heading}};
+  --webview-zoom: {{WebViewZoomCss}};
 }
 html, body {
   margin: 0;
@@ -2505,7 +2548,8 @@ html, body {
 .markdown-body {
   box-sizing: border-box;
   width: 100%;
-  max-width: 960px;
+  max-width: min(calc(960px / var(--webview-zoom)), 100%);
+  min-width: min(calc(800px / var(--webview-zoom)), 100%);
   overflow-x: hidden;
   overscroll-behavior-x: none;
   margin: 0 auto;
@@ -2722,6 +2766,11 @@ html, body {
 <script src="https://{{AssetHost}}/katex/katex.min.js"></script>
 <script nonce="{{nonce}}">
 let previewRenderToken = 0;
+
+window.mdvSetWebViewZoomFactor = function (zoom) {
+  const value = Math.max(0.25, Math.min(5, Number(zoom) || 1));
+  document.documentElement.style.setProperty('--webview-zoom', String(value));
+};
 
 function highlightCode(root) {
   if (!window.hljs) return;
@@ -3435,6 +3484,7 @@ window.mdvSetPreview = async function (html, sourceLine) {
   --surface: {{_colorProfile.Surface}};
   --quote-bg: {{_colorProfile.QuoteBackground}};
   --heading: {{_colorProfile.Heading}};
+  --webview-zoom: {{WebViewZoomCss}};
 }
 html, body {
   margin: 0;
@@ -3450,7 +3500,8 @@ html, body {
 #editor {
   box-sizing: border-box;
   width: 100%;
-  max-width: 920px;
+  max-width: min(calc(920px / var(--webview-zoom)), 100%);
+  min-width: min(calc(800px / var(--webview-zoom)), 100%);
   overflow-x: hidden;
   overscroll-behavior-x: none;
   margin: 0 auto;
@@ -3818,6 +3869,12 @@ let inputTimer = 0;
 let slashMenu = null;
 let slashIndex = 0;
 let wysiwygRenderToken = 0;
+
+window.mdvSetWebViewZoomFactor = function (zoom) {
+  const value = Math.max(0.25, Math.min(5, Number(zoom) || 1));
+  document.documentElement.style.setProperty('--webview-zoom', String(value));
+};
+
 const commands = [
   { label: 'Heading 1', hint: '# Title', template: '# ' },
   { label: 'Heading 2', hint: '## Title', template: '## ' },
