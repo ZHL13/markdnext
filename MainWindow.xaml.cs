@@ -67,7 +67,6 @@ public partial class MainWindow : Window
     private WindowBackdropKind _windowBackdrop = WindowBackdropKind.Flat;
     private string _editorFontFamily = "Consolas";
     private double _editorFontSize = 18;
-    private double _contentFontSize = 20;
     private double _webViewDefaultZoom = 0.9;
     private string _currentThemeId = DefaultThemeId;
     private string _linkColor = "#376f99";
@@ -2491,7 +2490,7 @@ public partial class MainWindow : Window
 
     private string EditorFontCss => CssFontFamily(_editorFontFamily, "Consolas, \"Cascadia Mono\", \"SFMono-Regular\", monospace");
 
-    private string ContentFontSizeCss => _contentFontSize.ToString("0.###", CultureInfo.InvariantCulture);
+    private string ContentFontSizeCss => "20";
 
     private string EditorFontSizeCss => "18";
 
@@ -3745,22 +3744,22 @@ html, body {
   outline: 0;
   background: transparent;
   color: var(--text);
-  line-height: 1.45;
+  font: {{ContentFontSizeCss}}px/1.45 {{ContentFontCss}};
   padding: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 .raw-editor.h1 {
-  font: 700 2.05em/1.25 "Segoe UI", system-ui, sans-serif;
+  font: 700 calc({{ContentFontSizeCss}}px * 2.05)/1.25 {{ContentFontCss}};
   border-bottom: 1px solid var(--line);
 }
 .raw-editor.h2 {
-  font: 700 1.5em/1.25 "Segoe UI", system-ui, sans-serif;
+  font: 700 calc({{ContentFontSizeCss}}px * 1.5)/1.25 {{ContentFontCss}};
   border-bottom: 1px solid var(--line);
 }
 .raw-editor.h3 {
-  font: 700 1.22em/1.25 "Segoe UI", system-ui, sans-serif;
+  font: 700 calc({{ContentFontSizeCss}}px * 1.22)/1.25 {{ContentFontCss}};
 }
 .raw-editor.quote {
   color: var(--muted);
@@ -3783,7 +3782,7 @@ html, body {
 }
 .raw-editor.math {
   color: #9d174d;
-  font-size: 1.08em;
+  font-size: calc({{ContentFontSizeCss}}px * 1.08);
 }
 .render-buffer {
   position: absolute;
