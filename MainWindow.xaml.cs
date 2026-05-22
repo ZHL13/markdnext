@@ -428,6 +428,7 @@ public partial class MainWindow : Window
         var originalWebEditorFontSize = _webEditorFontSize;
         var originalContentFontSize = _contentFontSize;
         var originalWebViewDefaultZoom = _webViewDefaultZoom;
+        var fontPreviewChanged = false;
 
         var familyBox = new ComboBox
         {
@@ -501,6 +502,56 @@ public partial class MainWindow : Window
         };
         okButton.Click += (_, _) => dialog.DialogResult = true;
 
+        void ApplyFontDialogAppearance()
+        {
+            var surface = BrushFromHex(_colorProfile.Surface);
+            var page = BrushFromHex(_colorProfile.Page);
+            var text = BrushFromHex(_colorProfile.Text);
+            var muted = BrushFromHex(_colorProfile.Muted);
+            var line = BrushFromHex(_colorProfile.Line);
+            var chrome = BrushFromHex(_colorProfile.Chrome);
+
+            dialog.Background = surface;
+            panel.Background = surface;
+            familyBox.Background = page;
+            familyBox.Foreground = text;
+            familyBox.BorderBrush = line;
+            sizeBox.Background = page;
+            sizeBox.Foreground = text;
+            sizeBox.BorderBrush = line;
+            zoomBox.Background = page;
+            zoomBox.Foreground = text;
+            zoomBox.BorderBrush = line;
+            okButton.Background = chrome;
+            okButton.Foreground = text;
+            okButton.BorderBrush = line;
+            cancelButton.Background = chrome;
+            cancelButton.Foreground = text;
+            cancelButton.BorderBrush = line;
+
+            familyBox.Resources[SystemColors.WindowBrushKey] = page;
+            familyBox.Resources[SystemColors.WindowTextBrushKey] = text;
+            familyBox.Resources[SystemColors.ControlBrushKey] = page;
+            familyBox.Resources[SystemColors.ControlTextBrushKey] = text;
+            familyBox.Resources[SystemColors.HighlightBrushKey] = BrushFromHex(MenuHighlightColor());
+            familyBox.Resources[SystemColors.HighlightTextBrushKey] = text;
+
+            foreach (var label in panel.Children.OfType<TextBlock>())
+            {
+                label.Foreground = muted;
+            }
+
+            foreach (var item in familyBox.Items.OfType<ComboBoxItem>())
+            {
+                item.Background = page;
+                item.Foreground = text;
+                if (item.Content is TextBlock textBlock)
+                {
+                    textBlock.Foreground = text;
+                }
+            }
+        }
+
         string SelectedFamily()
         {
             return familyBox.SelectedItem is ComboBoxItem { Tag: string familyName }
@@ -530,16 +581,52 @@ public partial class MainWindow : Window
             return Math.Clamp(zoomPercent / 100, 0.25, 5.0);
         }
 
+        bool SameFontSettings(
+            string editorFamily,
+            string contentFamily,
+            double editorSize,
+            double webEditorSize,
+            double contentSize,
+            double webViewZoom)
+        {
+            return string.Equals(_editorFontFamily, editorFamily, StringComparison.Ordinal)
+                && string.Equals(_contentFontFamily, contentFamily, StringComparison.Ordinal)
+                && Math.Abs(_editorFontSize - editorSize) < 0.001
+                && Math.Abs(_webEditorFontSize - webEditorSize) < 0.001
+                && Math.Abs(_contentFontSize - contentSize) < 0.001
+                && Math.Abs(_webViewDefaultZoom - webViewZoom) < 0.001;
+        }
+
         void ApplyFontPreview()
         {
             var selectedFamily = SelectedFamily();
-            _editorFontFamily = string.IsNullOrWhiteSpace(selectedFamily) ? "Consolas" : selectedFamily.Trim();
-            _contentFontFamily = _editorFontFamily;
-            _editorFontSize = SelectedSize();
-            _webEditorFontSize = _editorFontSize;
-            _contentFontSize = Math.Clamp(_editorFontSize + 2, 10, 54);
-            _webViewDefaultZoom = SelectedWebViewZoom();
+            var nextEditorFamily = string.IsNullOrWhiteSpace(selectedFamily) ? "Consolas" : selectedFamily.Trim();
+            var nextContentFamily = nextEditorFamily;
+            var nextEditorFontSize = SelectedSize();
+            var nextWebEditorFontSize = nextEditorFontSize;
+            var nextContentFontSize = Math.Clamp(nextEditorFontSize + 2, 10, 54);
+            var nextWebViewDefaultZoom = SelectedWebViewZoom();
+
+            if (SameFontSettings(
+                nextEditorFamily,
+                nextContentFamily,
+                nextEditorFontSize,
+                nextWebEditorFontSize,
+                nextContentFontSize,
+                nextWebViewDefaultZoom))
+            {
+                return;
+            }
+
+            _editorFontFamily = nextEditorFamily;
+            _contentFontFamily = nextContentFamily;
+            _editorFontSize = nextEditorFontSize;
+            _webEditorFontSize = nextWebEditorFontSize;
+            _contentFontSize = nextContentFontSize;
+            _webViewDefaultZoom = nextWebViewDefaultZoom;
+            fontPreviewChanged = true;
             ApplyAppearance();
+            ApplyFontDialogAppearance();
             ApplyWebViewDefaultZoom();
             RefreshRenderedShells();
         }
@@ -547,10 +634,23 @@ public partial class MainWindow : Window
         familyBox.SelectionChanged += (_, _) => ApplyFontPreview();
         sizeBox.TextChanged += (_, _) => ApplyFontPreview();
         zoomBox.TextChanged += (_, _) => ApplyFontPreview();
+        ApplyFontDialogAppearance();
 
         if (dialog.ShowDialog() == true)
         {
             StatusText.Text = $"Font changed to {_editorFontFamily}; WebView zoom {(_webViewDefaultZoom * 100).ToString("0", CultureInfo.InvariantCulture)}%";
+            return;
+        }
+
+        if (!fontPreviewChanged
+            || SameFontSettings(
+                originalEditorFontFamily,
+                originalContentFontFamily,
+                originalEditorFontSize,
+                originalWebEditorFontSize,
+                originalContentFontSize,
+                originalWebViewDefaultZoom))
+        {
             return;
         }
 
@@ -663,6 +763,8 @@ public partial class MainWindow : Window
         var originalMode = _themeMode;
         var originalProfile = _colorProfile;
         var originalLinkColor = _linkColor;
+        var suppressThemeSelection = false;
+        var themePreviewChanged = false;
 
         var list = new ListBox
         {
@@ -723,6 +825,12 @@ public partial class MainWindow : Window
             list.Background = listBackground;
             list.Foreground = text;
             list.BorderBrush = line;
+            list.Resources[SystemColors.WindowBrushKey] = listBackground;
+            list.Resources[SystemColors.WindowTextBrushKey] = text;
+            list.Resources[SystemColors.ControlBrushKey] = listBackground;
+            list.Resources[SystemColors.ControlTextBrushKey] = text;
+            list.Resources[SystemColors.HighlightBrushKey] = BrushFromHex(MenuHighlightColor());
+            list.Resources[SystemColors.HighlightTextBrushKey] = text;
             normalButton.Foreground = text;
             darkButton.Foreground = text;
             okButton.Foreground = text;
@@ -747,38 +855,71 @@ public partial class MainWindow : Window
 
         void PopulateThemeList(string selectedId)
         {
-            list.Items.Clear();
-            ListBoxItem? selectedItem = null;
-            foreach (var theme in _availableThemes)
+            suppressThemeSelection = true;
+            try
             {
-                var item = CreateThemeListItem(theme, _themeMode);
-                list.Items.Add(item);
-                if (string.Equals(theme.Id, selectedId, StringComparison.OrdinalIgnoreCase))
+                list.Items.Clear();
+                ListBoxItem? selectedItem = null;
+                foreach (var theme in _availableThemes)
                 {
-                    selectedItem = item;
+                    var item = CreateThemeListItem(theme, _themeMode);
+                    list.Items.Add(item);
+                    if (string.Equals(theme.Id, selectedId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        selectedItem = item;
+                    }
+                }
+
+                if (selectedItem is null && list.Items.Count > 0)
+                {
+                    selectedItem = (ListBoxItem)list.Items[0];
+                }
+
+                if (selectedItem is not null)
+                {
+                    list.SelectedItem = selectedItem;
                 }
             }
-
-            if (selectedItem is null && list.Items.Count > 0)
+            finally
             {
-                selectedItem = (ListBoxItem)list.Items[0];
+                suppressThemeSelection = false;
             }
+        }
 
-            if (selectedItem is not null)
-            {
-                list.SelectedItem = selectedItem;
-            }
+        bool SameThemeSettings(string themeId, ThemeMode mode, ColorProfile profile, string linkColor)
+        {
+            return string.Equals(_currentThemeId, themeId, StringComparison.OrdinalIgnoreCase)
+                && _themeMode == mode
+                && _colorProfile.Equals(profile)
+                && string.Equals(_linkColor, linkColor, StringComparison.OrdinalIgnoreCase);
         }
 
         void ApplySelection()
         {
+            if (suppressThemeSelection)
+            {
+                return;
+            }
+
             if (list.SelectedItem is not ListBoxItem { Tag: ThemeDefinition theme })
             {
                 return;
             }
 
+            var nextProfile = GetThemeProfile(theme, _themeMode).Normalized();
+            var nextLinkColor = GetThemeLinkColor(theme, _themeMode);
+            if (SameThemeSettings(theme.Id, _themeMode, nextProfile, nextLinkColor))
+            {
+                ApplyThemeDialogAppearance();
+                return;
+            }
+
             _currentThemeId = theme.Id;
-            ApplySelectedTheme();
+            _colorProfile = nextProfile;
+            _linkColor = nextLinkColor;
+            ApplyAppearance();
+            RefreshRenderedShells();
+            themePreviewChanged = true;
             ApplyThemeDialogAppearance();
         }
 
@@ -803,6 +944,12 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog() == true)
         {
             StatusText.Text = $"Theme: {FindTheme(_currentThemeId).DisplayName} ({ThemeModeLabel(_themeMode)})";
+            return;
+        }
+
+        if (!themePreviewChanged
+            || SameThemeSettings(originalThemeId, originalMode, originalProfile, originalLinkColor))
+        {
             return;
         }
 
@@ -1053,15 +1200,29 @@ public partial class MainWindow : Window
         return MixColors(_linkColor, _colorProfile.Muted, _themeMode == ThemeMode.Dark ? 0.48 : 0.38);
     }
 
+    private string MenuBackgroundColor()
+    {
+        return _themeMode == ThemeMode.Dark
+            ? MixColors(_colorProfile.Page, "#000000", 0.48)
+            : _colorProfile.Surface;
+    }
+
+    private string MenuHighlightColor()
+    {
+        var menuBackground = MenuBackgroundColor();
+        return _themeMode == ThemeMode.Dark
+            ? MixColors(menuBackground, _colorProfile.Accent, 0.30)
+            : MixColors(menuBackground, _colorProfile.Accent, 0.14);
+    }
+
     private void UpdateThemeBrushResources()
     {
         var selection = MixColors(_colorProfile.Chrome, _colorProfile.Accent, _themeMode == ThemeMode.Dark ? 0.34 : 0.16);
-        var menuBackground = _themeMode == ThemeMode.Dark
-            ? MixColors(_colorProfile.Page, "#000000", 0.48)
-            : _colorProfile.Surface;
+        var menuBackground = MenuBackgroundColor();
         var menuBorder = _themeMode == ThemeMode.Dark
             ? MixColors(menuBackground, _colorProfile.Text, 0.20)
             : MixColors(menuBackground, _colorProfile.Text, 0.18);
+        var menuHighlight = MenuHighlightColor();
         var scrollbarThumb = MixColors(_colorProfile.Surface, _colorProfile.Text, _themeMode == ThemeMode.Dark ? 0.22 : 0.16);
         var scrollbarThumbHover = MixColors(_colorProfile.Surface, _colorProfile.Text, _themeMode == ThemeMode.Dark ? 0.30 : 0.24);
 
@@ -1072,6 +1233,7 @@ public partial class MainWindow : Window
         RootDock.Resources["ThemeChromeBrush"] = BrushFromHex(_colorProfile.Chrome);
         RootDock.Resources["ThemeMenuBrush"] = BrushFromHex(menuBackground);
         RootDock.Resources["ThemeMenuBorderBrush"] = BrushFromHex(menuBorder);
+        RootDock.Resources["ThemeMenuHighlightBrush"] = BrushFromHex(menuHighlight);
         RootDock.Resources["ThemeSelectionBrush"] = BrushFromHex(selection);
         RootDock.Resources["ThemeScrollbarThumbBrush"] = BrushFromHex(scrollbarThumb);
         RootDock.Resources["ThemeScrollbarThumbHoverBrush"] = BrushFromHex(scrollbarThumbHover);

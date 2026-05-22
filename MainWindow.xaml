@@ -39,30 +39,208 @@
             <SolidColorBrush x:Key="ThemeChromeBrush" Color="#EAF3F6" />
             <SolidColorBrush x:Key="ThemeMenuBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="ThemeMenuBorderBrush" Color="#D9E0E8" />
+            <SolidColorBrush x:Key="ThemeMenuHighlightBrush" Color="#DCEEFF" />
             <SolidColorBrush x:Key="ThemeSelectionBrush" Color="#DCEEFF" />
             <SolidColorBrush x:Key="ThemeScrollbarThumbBrush" Color="#B8C4D2" />
             <SolidColorBrush x:Key="ThemeScrollbarThumbHoverBrush" Color="#91A0B4" />
+
+            <ControlTemplate x:Key="TopLevelMenuHeaderTemplate" TargetType="{x:Type MenuItem}">
+                <Grid>
+                    <Border x:Name="HeaderBorder"
+                            Background="{DynamicResource ThemeChromeBrush}"
+                            Padding="10,5">
+                        <ContentPresenter ContentSource="Header"
+                                          RecognizesAccessKey="True"
+                                          VerticalAlignment="Center"
+                                          TextElement.Foreground="{TemplateBinding Foreground}" />
+                    </Border>
+                    <Popup x:Name="PART_Popup"
+                           AllowsTransparency="True"
+                           Focusable="False"
+                           IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                           Placement="Bottom"
+                           PlacementTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"
+                           PopupAnimation="None">
+                        <Border Background="{DynamicResource ThemeMenuBrush}"
+                                BorderBrush="{DynamicResource ThemeMenuBorderBrush}"
+                                BorderThickness="1"
+                                MinWidth="220"
+                                SnapsToDevicePixels="True">
+                            <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
+                        </Border>
+                    </Popup>
+                </Grid>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsHighlighted" Value="True">
+                        <Setter TargetName="HeaderBorder" Property="Background" Value="{DynamicResource ThemeMenuHighlightBrush}" />
+                    </Trigger>
+                    <Trigger Property="IsSubmenuOpen" Value="True">
+                        <Setter TargetName="HeaderBorder" Property="Background" Value="{DynamicResource ThemeMenuHighlightBrush}" />
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Foreground" Value="{DynamicResource ThemeMutedBrush}" />
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+
+            <ControlTemplate x:Key="TopLevelMenuItemTemplate" TargetType="{x:Type MenuItem}">
+                <Border x:Name="HeaderBorder"
+                        Background="{DynamicResource ThemeChromeBrush}"
+                        Padding="10,5">
+                    <ContentPresenter ContentSource="Header"
+                                      RecognizesAccessKey="True"
+                                      VerticalAlignment="Center"
+                                      TextElement.Foreground="{TemplateBinding Foreground}" />
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsHighlighted" Value="True">
+                        <Setter TargetName="HeaderBorder" Property="Background" Value="{DynamicResource ThemeMenuHighlightBrush}" />
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Foreground" Value="{DynamicResource ThemeMutedBrush}" />
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+
+            <ControlTemplate x:Key="SubmenuHeaderTemplate" TargetType="{x:Type MenuItem}">
+                <Grid>
+                    <Border x:Name="RowBackground"
+                            Background="{DynamicResource ThemeMenuBrush}"
+                            MinHeight="30"
+                            SnapsToDevicePixels="True">
+                        <Grid Margin="0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="28" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="22" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="CheckMark"
+                                       Grid.Column="0"
+                                       Text="✓"
+                                       Visibility="Hidden"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Foreground="{TemplateBinding Foreground}" />
+                            <ContentPresenter Grid.Column="1"
+                                              Margin="0,5,18,5"
+                                              ContentSource="Header"
+                                              RecognizesAccessKey="True"
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}" />
+                            <TextBlock Grid.Column="2"
+                                       Margin="12,5,8,5"
+                                       Text="{TemplateBinding InputGestureText}"
+                                       Foreground="{DynamicResource ThemeMutedBrush}"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="3"
+                                       Text="›"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Foreground="{TemplateBinding Foreground}" />
+                        </Grid>
+                    </Border>
+                    <Popup x:Name="PART_Popup"
+                           AllowsTransparency="True"
+                           Focusable="False"
+                           HorizontalOffset="-1"
+                           IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                           Placement="Right"
+                           PlacementTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"
+                           PopupAnimation="None">
+                        <Border Background="{DynamicResource ThemeMenuBrush}"
+                                BorderBrush="{DynamicResource ThemeMenuBorderBrush}"
+                                BorderThickness="1"
+                                MinWidth="220"
+                                SnapsToDevicePixels="True">
+                            <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
+                        </Border>
+                    </Popup>
+                </Grid>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsHighlighted" Value="True">
+                        <Setter TargetName="RowBackground" Property="Background" Value="{DynamicResource ThemeMenuHighlightBrush}" />
+                    </Trigger>
+                    <Trigger Property="IsSubmenuOpen" Value="True">
+                        <Setter TargetName="RowBackground" Property="Background" Value="{DynamicResource ThemeMenuHighlightBrush}" />
+                    </Trigger>
+                    <Trigger Property="IsChecked" Value="True">
+                        <Setter TargetName="CheckMark" Property="Visibility" Value="Visible" />
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Foreground" Value="{DynamicResource ThemeMutedBrush}" />
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+
+            <ControlTemplate x:Key="SubmenuItemTemplate" TargetType="{x:Type MenuItem}">
+                <Border x:Name="RowBackground"
+                        Background="{DynamicResource ThemeMenuBrush}"
+                        MinHeight="30"
+                        SnapsToDevicePixels="True">
+                    <Grid Margin="0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="28" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="10" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="CheckMark"
+                                   Grid.Column="0"
+                                   Text="✓"
+                                   Visibility="Hidden"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Foreground="{TemplateBinding Foreground}" />
+                        <ContentPresenter Grid.Column="1"
+                                          Margin="0,5,18,5"
+                                          ContentSource="Header"
+                                          RecognizesAccessKey="True"
+                                          VerticalAlignment="Center"
+                                          TextElement.Foreground="{TemplateBinding Foreground}" />
+                        <TextBlock Grid.Column="2"
+                                   Margin="12,5,8,5"
+                                   Text="{TemplateBinding InputGestureText}"
+                                   Foreground="{DynamicResource ThemeMutedBrush}"
+                                   VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsHighlighted" Value="True">
+                        <Setter TargetName="RowBackground" Property="Background" Value="{DynamicResource ThemeMenuHighlightBrush}" />
+                    </Trigger>
+                    <Trigger Property="IsChecked" Value="True">
+                        <Setter TargetName="CheckMark" Property="Visibility" Value="Visible" />
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Foreground" Value="{DynamicResource ThemeMutedBrush}" />
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
 
             <Style TargetType="{x:Type MenuItem}">
                 <Setter Property="Foreground" Value="{DynamicResource ThemeTextBrush}" />
                 <Setter Property="Background" Value="{DynamicResource ThemeMenuBrush}" />
                 <Setter Property="BorderBrush" Value="{DynamicResource ThemeMenuBorderBrush}" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
                 <Style.Triggers>
                     <Trigger Property="Role" Value="TopLevelHeader">
                         <Setter Property="Background" Value="{DynamicResource ThemeChromeBrush}" />
                         <Setter Property="BorderBrush" Value="{DynamicResource ThemeChromeBrush}" />
+                        <Setter Property="Template" Value="{StaticResource TopLevelMenuHeaderTemplate}" />
                     </Trigger>
                     <Trigger Property="Role" Value="TopLevelItem">
                         <Setter Property="Background" Value="{DynamicResource ThemeChromeBrush}" />
                         <Setter Property="BorderBrush" Value="{DynamicResource ThemeChromeBrush}" />
+                        <Setter Property="Template" Value="{StaticResource TopLevelMenuItemTemplate}" />
                     </Trigger>
-                    <Trigger Property="IsHighlighted" Value="True">
-                        <Setter Property="Background" Value="{DynamicResource ThemeSelectionBrush}" />
-                        <Setter Property="BorderBrush" Value="{DynamicResource ThemeSelectionBrush}" />
+                    <Trigger Property="Role" Value="SubmenuHeader">
+                        <Setter Property="Template" Value="{StaticResource SubmenuHeaderTemplate}" />
                     </Trigger>
-                    <Trigger Property="IsSubmenuOpen" Value="True">
-                        <Setter Property="Background" Value="{DynamicResource ThemeSelectionBrush}" />
-                        <Setter Property="BorderBrush" Value="{DynamicResource ThemeSelectionBrush}" />
+                    <Trigger Property="Role" Value="SubmenuItem">
+                        <Setter Property="Template" Value="{StaticResource SubmenuItemTemplate}" />
                     </Trigger>
                     <Trigger Property="IsEnabled" Value="False">
                         <Setter Property="Foreground" Value="{DynamicResource ThemeMutedBrush}" />
