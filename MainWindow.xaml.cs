@@ -1,5 +1,6 @@
 using ICSharpCode.AvalonEdit.CodeCompletion;
 using ICSharpCode.AvalonEdit.Document;
+using ICSharpCode.AvalonEdit.Rendering;
 using Markdig;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
@@ -30,6 +31,7 @@ public partial class MainWindow : Window
     private const string AssetHost = "mdv-assets.local";
     private const string LocalImageHost = "mdv-local-image.local";
     private const string DefaultThemeId = "flat";
+    private const double DefaultEditorLineSpacing = 1.2;
     private const int ListIndentSize = 4;
     private static readonly UTF8Encoding Utf8NoBom = new(false);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -37,6 +39,7 @@ public partial class MainWindow : Window
 
     private readonly IReadOnlyList<ThemeDefinition> _availableThemes = LoadBuiltInThemes();
     private readonly MarkdownColorizer _markdownColorizer = new();
+    private readonly EditorLineSpacingElementGenerator _editorLineSpacingGenerator = new();
     private readonly MarkdownPipeline _markdownPipeline;
     private readonly DispatcherTimer _renderTimer;
     private readonly DispatcherTimer _previewScrollTimer;
@@ -45,6 +48,7 @@ public partial class MainWindow : Window
     private readonly string _assetFolder;
 
     private CompletionWindow? _completionWindow;
+    private EditorLineBackgroundRenderer? _editorLineBackgroundRenderer;
     private FileSystemWatcher? _watcher;
     private string? _currentFilePath;
     private DateTime _lastDiskWriteUtc;
@@ -62,12 +66,14 @@ public partial class MainWindow : Window
     private bool _previewFailed;
     private bool _wysiwygMode;
     private bool _automaticCompletionEnabled;
-    private bool _menuBarHidden = true;
+    private bool _menuBarHidden;
     private ViewMode _viewMode = ViewMode.Both;
     private ViewMode _viewModeBeforeWysiwyg = ViewMode.Both;
+    private SearchTarget _searchTarget = SearchTarget.Editor;
     private WindowBackdropKind _windowBackdrop = WindowBackdropKind.Flat;
     private string _editorFontFamily = "Consolas";
     private double _editorFontSize = 18;
+    private double _editorLineSpacing = DefaultEditorLineSpacing;
     private double _webViewDefaultZoom = 0.9;
     private double _previewZoom = 0.9;
     private double _wysiwygZoom = 0.9;
@@ -104,6 +110,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         LoadSettings();
         ConfigureEditor();
+        ConfigureSearchTargetTracking();
         ApplyAppearance();
         Loaded += MainWindow_Loaded;
     }
@@ -114,15 +121,40 @@ public partial class MainWindow : Window
         Editor.Options.IndentationSize = 4;
         Editor.Options.EnableHyperlinks = false;
         Editor.Options.EnableEmailHyperlinks = false;
+        Editor.Options.HighlightCurrentLine = false;
         Editor.TextArea.Caret.PositionChanged += (_, _) =>
         {
             UpdatePosition();
             SchedulePreviewScrollSync();
+            InvalidateEditorLineBackgrounds();
         };
+        Editor.TextArea.SelectionChanged += (_, _) => InvalidateEditorLineBackgrounds();
         Editor.TextArea.TextEntered += Editor_TextArea_TextEntered;
         Editor.TextArea.PreviewKeyDown += Editor_TextArea_PreviewKeyDown;
         Editor.PreviewMouseWheel += Editor_PreviewMouseWheel;
+        Editor.TextArea.TextView.ElementGenerators.Add(_editorLineSpacingGenerator);
+        _editorLineBackgroundRenderer = new EditorLineBackgroundRenderer(Editor);
+        Editor.TextArea.TextView.BackgroundRenderers.Add(_editorLineBackgroundRenderer);
         Editor.TextArea.TextView.LineTransformers.Add(_markdownColorizer);
+    }
+
+    private void InvalidateEditorLineBackgrounds()
+    {
+        Editor.TextArea.TextView.InvalidateLayer(KnownLayer.Background);
+    }
+
+    private void ConfigureSearchTargetTracking()
+    {
+        Editor.GotKeyboardFocus += (_, _) => SetSearchTarget(SearchTarget.Editor);
+        Editor.TextArea.GotKeyboardFocus += (_, _) => SetSearchTarget(SearchTarget.Editor);
+        Editor.PreviewMouseDown += (_, _) => SetSearchTarget(SearchTarget.Editor);
+        Editor.TextArea.PreviewMouseDown += (_, _) => SetSearchTarget(SearchTarget.Editor);
+
+        Preview.GotKeyboardFocus += (_, _) => SetSearchTarget(SearchTarget.Preview);
+        Preview.PreviewMouseDown += (_, _) => SetSearchTarget(SearchTarget.Preview);
+
+        Wysiwyg.GotKeyboardFocus += (_, _) => SetSearchTarget(SearchTarget.Wysiwyg);
+        Wysiwyg.PreviewMouseDown += (_, _) => SetSearchTarget(SearchTarget.Wysiwyg);
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -251,6 +283,7 @@ public partial class MainWindow : Window
                 ? _editorFontFamily
                 : settings.EditorFontFamily.Trim();
             _editorFontSize = Math.Clamp(settings.EditorFontSize ?? _editorFontSize, 8, 48);
+            _editorLineSpacing = Math.Clamp(settings.EditorLineSpacing ?? _editorLineSpacing, 1.0, 3.0);
             _webViewDefaultZoom = Math.Clamp(settings.WebViewDefaultZoom ?? _webViewDefaultZoom, 0.25, 5.0);
             _previewZoom = Math.Clamp(settings.PreviewZoom ?? _webViewDefaultZoom, 0.25, 5.0);
             _wysiwygZoom = Math.Clamp(settings.WysiwygZoom ?? _webViewDefaultZoom, 0.25, 5.0);
@@ -328,6 +361,7 @@ public partial class MainWindow : Window
             var settings = new AppSettings(
                 _editorFontFamily,
                 _editorFontSize,
+                _editorLineSpacing,
                 _webViewDefaultZoom,
                 _previewZoom,
                 _wysiwygZoom,
@@ -554,7 +588,23 @@ public partial class MainWindow : Window
 
     private void AutoCompletion_Click(object sender, RoutedEventArgs e)
     {
-        _automaticCompletionEnabled = AutoCompletionMenuItem.IsChecked;
+        SetAutomaticCompletion(AutoCompletionMenuItem.IsChecked);
+    }
+
+    private void ToggleAutomaticCompletion()
+    {
+        SetAutomaticCompletion(!_automaticCompletionEnabled);
+    }
+
+    private void SetAutomaticCompletion(bool enabled)
+    {
+        _automaticCompletionEnabled = enabled;
+        AutoCompletionMenuItem.IsChecked = enabled;
+        if (!enabled)
+        {
+            _completionWindow?.Close();
+        }
+
         StatusText.Text = _automaticCompletionEnabled
             ? "Automatic completion enabled"
             : "Automatic completion disabled.";
@@ -613,6 +663,7 @@ public partial class MainWindow : Window
     {
         var originalEditorFontFamily = _editorFontFamily;
         var originalEditorFontSize = _editorFontSize;
+        var originalEditorLineSpacing = _editorLineSpacing;
         var originalWebViewDefaultZoom = _webViewDefaultZoom;
         var fontPreviewChanged = false;
 
@@ -660,6 +711,12 @@ public partial class MainWindow : Window
             MinWidth = 120,
             Margin = new Thickness(0, 4, 0, 14)
         };
+        var lineSpacingBox = new TextBox
+        {
+            Text = (_editorLineSpacing * 100).ToString("0", CultureInfo.InvariantCulture),
+            MinWidth = 120,
+            Margin = new Thickness(0, 4, 0, 14)
+        };
         var zoomBox = new TextBox
         {
             Text = (_webViewDefaultZoom * 100).ToString("0", CultureInfo.InvariantCulture),
@@ -677,6 +734,8 @@ public partial class MainWindow : Window
         panel.Children.Add(familyBox);
         panel.Children.Add(new TextBlock { Text = "Font size" });
         panel.Children.Add(sizeBox);
+        panel.Children.Add(new TextBlock { Text = "Editor line spacing (%)" });
+        panel.Children.Add(lineSpacingBox);
         panel.Children.Add(new TextBlock { Text = "WebView default zoom (%)" });
         panel.Children.Add(zoomBox);
         panel.Children.Add(buttons);
@@ -709,6 +768,9 @@ public partial class MainWindow : Window
             sizeBox.Background = page;
             sizeBox.Foreground = text;
             sizeBox.BorderBrush = line;
+            lineSpacingBox.Background = page;
+            lineSpacingBox.Foreground = text;
+            lineSpacingBox.BorderBrush = line;
             zoomBox.Background = page;
             zoomBox.Foreground = text;
             zoomBox.BorderBrush = line;
@@ -762,6 +824,17 @@ public partial class MainWindow : Window
             return Math.Clamp(size, 8, 48);
         }
 
+        double SelectedLineSpacing()
+        {
+            if (!double.TryParse(lineSpacingBox.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out var spacingPercent)
+                && !double.TryParse(lineSpacingBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out spacingPercent))
+            {
+                spacingPercent = originalEditorLineSpacing * 100;
+            }
+
+            return Math.Clamp(spacingPercent / 100, 1.0, 3.0);
+        }
+
         double SelectedWebViewZoom()
         {
             if (!double.TryParse(zoomBox.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out var zoomPercent)
@@ -776,10 +849,12 @@ public partial class MainWindow : Window
         bool SameFontSettings(
             string editorFamily,
             double editorSize,
+            double editorLineSpacing,
             double webViewZoom)
         {
             return string.Equals(_editorFontFamily, editorFamily, StringComparison.Ordinal)
                 && Math.Abs(_editorFontSize - editorSize) < 0.001
+                && Math.Abs(_editorLineSpacing - editorLineSpacing) < 0.001
                 && Math.Abs(_webViewDefaultZoom - webViewZoom) < 0.001;
         }
 
@@ -788,11 +863,13 @@ public partial class MainWindow : Window
             var selectedFamily = SelectedFamily();
             var nextEditorFamily = string.IsNullOrWhiteSpace(selectedFamily) ? "Consolas" : selectedFamily.Trim();
             var nextEditorFontSize = SelectedSize();
+            var nextEditorLineSpacing = SelectedLineSpacing();
             var nextWebViewDefaultZoom = SelectedWebViewZoom();
 
             if (SameFontSettings(
                 nextEditorFamily,
                 nextEditorFontSize,
+                nextEditorLineSpacing,
                 nextWebViewDefaultZoom))
             {
                 return;
@@ -802,6 +879,7 @@ public partial class MainWindow : Window
             var webZoomChanged = Math.Abs(_webViewDefaultZoom - nextWebViewDefaultZoom) >= 0.001;
             _editorFontFamily = nextEditorFamily;
             _editorFontSize = nextEditorFontSize;
+            _editorLineSpacing = nextEditorLineSpacing;
             _webViewDefaultZoom = nextWebViewDefaultZoom;
             fontPreviewChanged = true;
             ApplyAppearance();
@@ -818,12 +896,13 @@ public partial class MainWindow : Window
 
         familyBox.SelectionChanged += (_, _) => ApplyFontPreview();
         sizeBox.TextChanged += (_, _) => ApplyFontPreview();
+        lineSpacingBox.TextChanged += (_, _) => ApplyFontPreview();
         zoomBox.TextChanged += (_, _) => ApplyFontPreview();
         ApplyFontDialogAppearance();
 
         if (dialog.ShowDialog() == true)
         {
-            StatusText.Text = $"Font changed to {_editorFontFamily}; WebView zoom {(_webViewDefaultZoom * 100).ToString("0", CultureInfo.InvariantCulture)}%";
+            StatusText.Text = $"Font changed to {_editorFontFamily}; line spacing {(_editorLineSpacing * 100).ToString("0", CultureInfo.InvariantCulture)}%; WebView zoom {(_webViewDefaultZoom * 100).ToString("0", CultureInfo.InvariantCulture)}%";
             SaveSettings();
             return;
         }
@@ -832,6 +911,7 @@ public partial class MainWindow : Window
             || SameFontSettings(
                 originalEditorFontFamily,
                 originalEditorFontSize,
+                originalEditorLineSpacing,
                 originalWebViewDefaultZoom))
         {
             return;
@@ -841,6 +921,7 @@ public partial class MainWindow : Window
         var webZoomChangedOnCancel = Math.Abs(_webViewDefaultZoom - originalWebViewDefaultZoom) >= 0.001;
         _editorFontFamily = originalEditorFontFamily;
         _editorFontSize = originalEditorFontSize;
+        _editorLineSpacing = originalEditorLineSpacing;
         _webViewDefaultZoom = originalWebViewDefaultZoom;
         ApplyAppearance();
         if (webZoomChangedOnCancel)
@@ -869,6 +950,7 @@ public partial class MainWindow : Window
         var webFontFamilyChanged = !string.Equals(_editorFontFamily, "Consolas", StringComparison.Ordinal);
         _editorFontFamily = "Consolas";
         _editorFontSize = 18;
+        _editorLineSpacing = DefaultEditorLineSpacing;
         _webViewDefaultZoom = 0.9;
         ApplyAppearance();
         ApplyWebViewDefaultZoom();
@@ -1380,10 +1462,23 @@ public partial class MainWindow : Window
 
         Editor.FontFamily = new FontFamily(_editorFontFamily);
         Editor.FontSize = _editorFontSize;
+        ApplyEditorLineSpacing();
         Editor.Foreground = BrushFromHex(_colorProfile.EditorText);
         Editor.Background = BrushFromHex(_colorProfile.EditorBackground);
         Editor.LineNumbersForeground = BrushFromHex(_colorProfile.Muted);
-        Editor.TextArea.SelectionBrush = BrushFromHex(_colorProfile.Accent, 0x44);
+        var lineHighlightBrush = BrushFromHex(EditorCurrentLineHighlightColor());
+        var selectionBrush = BrushFromHex(EditorSelectionHighlightColor());
+        var selectionBorder = new Pen(BrushFromHex(EditorSelectionBorderColor()), 1);
+        selectionBorder.Freeze();
+        Editor.TextArea.SelectionBrush = selectionBrush;
+        Editor.TextArea.SelectionBorder = selectionBorder;
+        if (_editorLineBackgroundRenderer is not null)
+        {
+            _editorLineBackgroundRenderer.Background = lineHighlightBrush;
+        }
+
+        Editor.TextArea.TextView.CurrentLineBackground = null;
+        Editor.TextArea.TextView.CurrentLineBorder = null;
 
         RootDock.Background = _windowBackdrop switch
         {
@@ -1436,6 +1531,75 @@ public partial class MainWindow : Window
         return _themeMode == ThemeMode.Dark
             ? MixColors(_colorProfile.EditorBackground, _linkColor, 0.54)
             : MixColors(_colorProfile.EditorText, _linkColor, 0.46);
+    }
+
+    private string EditorCurrentLineHighlightColor()
+    {
+        var background = EffectiveEditorBackgroundColor();
+        var text = _colorProfile.EditorText;
+        var amount = _themeMode == ThemeMode.Dark ? 0.36 : 0.18;
+        var minimumContrast = Math.Min(4.5, ContrastRatio(background, text));
+        var candidate = MixColors(background, _colorProfile.Accent, amount);
+
+        while (amount > 0.06 && ContrastRatio(candidate, text) < minimumContrast)
+        {
+            amount -= 0.02;
+            candidate = MixColors(background, _colorProfile.Accent, amount);
+        }
+
+        return candidate;
+    }
+
+    private string EditorSelectionHighlightColor()
+    {
+        var background = EffectiveEditorBackgroundColor();
+        var text = _colorProfile.EditorText;
+        var amount = _themeMode == ThemeMode.Dark ? 0.56 : 0.34;
+        var minimumContrast = Math.Min(4.5, ContrastRatio(background, text));
+        var candidate = MixColors(background, _colorProfile.Accent, amount);
+
+        while (amount > 0.12 && ContrastRatio(candidate, text) < minimumContrast)
+        {
+            amount -= 0.02;
+            candidate = MixColors(background, _colorProfile.Accent, amount);
+        }
+
+        return candidate;
+    }
+
+    private string EditorSelectionBorderColor()
+    {
+        var selection = EditorSelectionHighlightColor();
+        return _themeMode == ThemeMode.Dark
+            ? MixColors(selection, _colorProfile.EditorText, 0.28)
+            : MixColors(selection, _colorProfile.EditorText, 0.24);
+    }
+
+    private void ApplyEditorLineSpacing()
+    {
+        var textView = Editor.TextArea.TextView;
+        var baseLineHeight = textView.DefaultLineHeight;
+        if (!double.IsFinite(baseLineHeight) || baseLineHeight <= 0)
+        {
+            baseLineHeight = _editorFontSize * 1.2;
+        }
+
+        var baselinePadding = baseLineHeight - Editor.TextArea.TextView.DefaultBaseline;
+        if (!double.IsFinite(baselinePadding) || baselinePadding < 0)
+        {
+            baselinePadding = 0;
+        }
+
+        _editorLineSpacingGenerator.TargetLineHeight = _editorLineSpacing > 1.001
+            ? baseLineHeight * _editorLineSpacing
+            : 0;
+        _editorLineSpacingGenerator.BaselinePadding = baselinePadding;
+    }
+
+    private string EffectiveEditorBackgroundColor()
+    {
+        var background = ParseThemeColor(_colorProfile.EditorBackground, Colors.White);
+        return background.A < 0x40 ? _colorProfile.Surface : _colorProfile.EditorBackground;
     }
 
     private string MenuBackgroundColor()
@@ -1640,7 +1804,7 @@ public partial class MainWindow : Window
     {
         MessageBox.Show(
             this,
-            "MarkDNext\n\nNative WPF Markdown editor and viewer with source editing, WYSIWYG block editing, KaTeX formulas, code highlighting, completion, file watching, and system print/PDF export.",
+            "MarkDNext\n\nNative WPF Markdown editor and viewer with source editing, WYSIWYG block editing, KaTeX formulas, code highlighting, completion, file watching, and system print/PDF export.\n\nVibe-coded with help from Codex. Inspired by MDV, MarkText, and ghostwriter.",
             "About MarkDNext",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
@@ -1739,9 +1903,16 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Space)
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.W)
         {
-            ShowCompletionWindow(replaceActivationText: true);
+            Close();
+            e.Handled = true;
+            return;
+        }
+
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.H)
+        {
+            ToggleAutomaticCompletion();
             e.Handled = true;
         }
     }
@@ -2141,9 +2312,14 @@ public partial class MainWindow : Window
             ShowFindBar();
             e.Handled = true;
         }
-        else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Space)
+        else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.W)
         {
-            ShowCompletionWindow(replaceActivationText: true);
+            Close();
+            e.Handled = true;
+        }
+        else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.H)
+        {
+            ToggleAutomaticCompletion();
             e.Handled = true;
         }
         else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Z)
@@ -2989,6 +3165,15 @@ html, body {
 <script src="https://{{AssetHost}}/katex/katex.min.js"></script>
 <script nonce="{{nonce}}">
 let previewRenderToken = 0;
+
+function postPreviewFocus() {
+  if (!window.chrome || !window.chrome.webview) return;
+  window.chrome.webview.postMessage({ type: 'previewFocus' });
+}
+
+document.addEventListener('pointerdown', postPreviewFocus, true);
+document.addEventListener('focusin', postPreviewFocus, true);
+document.addEventListener('keydown', postPreviewFocus, true);
 
 window.mdvSetWebViewZoomFactor = function (zoom) {
   const value = Math.max(0.25, Math.min(5, Number(zoom) || 1));
@@ -4205,6 +4390,15 @@ function post(type) {
   if (!window.chrome || !window.chrome.webview) return;
   window.chrome.webview.postMessage({ type: type, markdown: markdownText() });
 }
+
+function postWysiwygFocus() {
+  if (!window.chrome || !window.chrome.webview) return;
+  window.chrome.webview.postMessage({ type: 'wysiwygFocus' });
+}
+
+document.addEventListener('pointerdown', postWysiwygFocus, true);
+document.addEventListener('focusin', postWysiwygFocus, true);
+document.addEventListener('keydown', postWysiwygFocus, true);
 
 document.addEventListener('keydown', function (event) {
   const key = (event.key || '').toLowerCase();
@@ -5698,9 +5892,14 @@ refreshEnhancements(document);
         await ShowSystemPrintDialogAsync();
     }
 
-    private async void Export_Click(object sender, RoutedEventArgs e)
+    private async void ExportHtml_Click(object sender, RoutedEventArgs e)
     {
-        await ShowSystemPrintDialogAsync();
+        await ExportHtmlAsync();
+    }
+
+    private async void ExportPdf_Click(object sender, RoutedEventArgs e)
+    {
+        await ExportPdfAsync();
     }
 
     private async Task ShowSystemPrintDialogAsync()
@@ -5717,10 +5916,502 @@ refreshEnhancements(document);
         StatusText.Text = "Choose Microsoft Print to PDF in the system print dialog to export PDF.";
     }
 
+    private async Task ExportHtmlAsync()
+    {
+        var dialog = new SaveFileDialog
+        {
+            Filter = "HTML file (*.html)|*.html|All files (*.*)|*.*",
+            FileName = GetDefaultExportFileName(".html")
+        };
+
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        if (!await PreparePreviewForExportAsync())
+        {
+            return;
+        }
+
+        try
+        {
+            var body = await GetRenderedPreviewBodyHtmlAsync();
+            body = ConvertPreviewResourceUrisForExport(body, dialog.FileName);
+            var html = BuildStaticExportDocument(body);
+            File.WriteAllText(dialog.FileName, html, Utf8NoBom);
+            StatusText.Text = $"Exported HTML {Path.GetFileName(dialog.FileName)}";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "HTML export failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private async Task ExportPdfAsync()
+    {
+        var dialog = new SaveFileDialog
+        {
+            Filter = "PDF file (*.pdf)|*.pdf|All files (*.*)|*.*",
+            FileName = GetDefaultExportFileName(".pdf")
+        };
+
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        if (!await PreparePreviewForExportAsync() || Preview.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var fullPath = Path.GetFullPath(dialog.FileName);
+            var settings = Preview.CoreWebView2.Environment.CreatePrintSettings();
+            settings.ShouldPrintBackgrounds = true;
+            settings.ShouldPrintHeaderAndFooter = false;
+            settings.ScaleFactor = 1.0;
+
+            var success = await Preview.CoreWebView2.PrintToPdfAsync(fullPath, settings);
+            StatusText.Text = success
+                ? $"Exported PDF {Path.GetFileName(fullPath)}"
+                : "PDF export failed.";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "PDF export failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private async Task<bool> PreparePreviewForExportAsync()
+    {
+        if (!_previewReady || Preview.CoreWebView2 is null)
+        {
+            StatusText.Text = "Preview is not ready.";
+            return false;
+        }
+
+        await SyncWysiwygEditorAsync();
+        await RenderPreviewAsync();
+        return true;
+    }
+
+    private async Task<string> GetRenderedPreviewBodyHtmlAsync()
+    {
+        var result = await Preview.ExecuteScriptAsync(
+            "document.getElementById('content') ? document.getElementById('content').innerHTML : '';");
+        return JsonSerializer.Deserialize<string>(result, JsonOptions) ?? string.Empty;
+    }
+
+    private string BuildStaticExportDocument(string bodyHtml)
+    {
+        var title = WebUtility.HtmlEncode(_currentFilePath is null ? "Untitled" : Path.GetFileName(_currentFilePath));
+        var highlightCss = ReadEmbeddedAssetText("Assets/highlight-github.min.css");
+        var katexCss = InlineCssFontUrls(ReadEmbeddedAssetText("Assets/katex/katex.min.css"), "Assets/katex/");
+
+        return $$"""
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{title}}</title>
+<style>
+{{highlightCss}}
+{{katexCss}}
+:root {
+  color-scheme: {{ColorSchemeCss}};
+  --page: {{_colorProfile.Page}};
+  --text: {{_colorProfile.Text}};
+  --muted: {{_colorProfile.Muted}};
+  --line: {{_colorProfile.Line}};
+  --code: {{_colorProfile.Code}};
+  --link: {{_linkColor}};
+  --surface: {{_colorProfile.Surface}};
+  --quote-bg: {{_colorProfile.QuoteBackground}};
+  --heading: {{_colorProfile.Heading}};
+}
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--page);
+  color: var(--text);
+  font: {{ContentFontSizeCss}}px/1.62 {{ContentFontCss}};
+}
+.markdown-body {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 34px 42px 72px;
+}
+.markdown-body > :first-child { margin-top: 0; }
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+  line-height: 1.25;
+  margin: 1.5em 0 .6em;
+  color: var(--heading);
+}
+.markdown-body h1 {
+  padding-bottom: .32em;
+  border-bottom: 1px solid var(--line);
+  font-size: 2.1em;
+}
+.markdown-body h2 {
+  padding-bottom: .25em;
+  border-bottom: 1px solid var(--line);
+  font-size: 1.55em;
+}
+.markdown-body h3 { font-size: 1.25em; }
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body blockquote,
+.markdown-body pre,
+.markdown-body table {
+  margin-top: 0;
+  margin-bottom: 1em;
+}
+.markdown-body a {
+  color: var(--link);
+  text-decoration: none;
+}
+.markdown-body a:hover { text-decoration: underline; }
+.markdown-body blockquote {
+  border-left: 4px solid #9fb2c7;
+  color: var(--muted);
+  padding: .1em 1em;
+  margin-left: 0;
+  background: var(--quote-bg);
+}
+.markdown-body code {
+  font-family: {{EditorFontCss}};
+  background: var(--code);
+  border-radius: 4px;
+  padding: .13em .32em;
+  font-size: .92em;
+}
+.markdown-body pre {
+  overflow: auto;
+  background: var(--code);
+  border: 0;
+  border-radius: 0;
+  padding: 14px 16px;
+}
+.markdown-body pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: .9em;
+}
+.markdown-body table {
+  width: max-content;
+  max-width: 100%;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid var(--line);
+  padding: 6px 10px;
+}
+.markdown-body tr:nth-child(2n) { background: var(--quote-bg); }
+.markdown-body img {
+  max-width: 100%;
+  height: auto;
+}
+.mdv-front-matter {
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  background: var(--quote-bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 1em;
+}
+.mdv-front-matter table {
+  width: 100%;
+  max-width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  display: table;
+  margin: 0;
+}
+.mdv-front-matter th {
+  width: 11rem;
+  max-width: 38%;
+  white-space: normal;
+  text-align: left;
+  vertical-align: top;
+}
+.mdv-front-matter th,
+.mdv-front-matter td {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  vertical-align: top;
+}
+.markdown-body hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 2em 0;
+}
+.markdown-body input[type="checkbox"] {
+  transform: translateY(1px);
+  margin-right: .45em;
+}
+.markdown-body li.mdv-task-item {
+  list-style-type: none;
+}
+.markdown-body li.mdv-task-item > input[type="checkbox"] {
+  margin-left: -1.35em;
+}
+.math-display,
+.math-row,
+.math-shell {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  text-align: center;
+}
+.math-display .katex-display {
+  display: block;
+  width: 100%;
+  margin: 0 auto !important;
+  max-width: 100%;
+  min-width: 0;
+  text-align: center;
+}
+.math-display .katex {
+  display: inline-block !important;
+}
+@media print {
+  .markdown-body {
+    max-width: none;
+    padding: 0;
+  }
+  a { color: inherit; text-decoration: none; }
+}
+</style>
+</head>
+<body>
+<main class="markdown-body">
+{{bodyHtml}}
+</main>
+</body>
+</html>
+""";
+    }
+
+    private string ConvertPreviewResourceUrisForExport(string html, string htmlPath)
+    {
+        var exportFolder = Path.GetDirectoryName(Path.GetFullPath(htmlPath));
+        if (string.IsNullOrWhiteSpace(exportFolder))
+        {
+            exportFolder = Environment.CurrentDirectory;
+        }
+
+        var assetsFolder = Path.Combine(exportFolder, "assets");
+        var copiedImages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var usedAssetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        return Regex.Replace(
+            html,
+            "(<img\\b[^>]*?\\bsrc\\s*=\\s*)(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))",
+            match =>
+            {
+                var src = match.Groups[2].Success
+                    ? match.Groups[2].Value
+                    : match.Groups[3].Success
+                        ? match.Groups[3].Value
+                        : match.Groups[4].Value;
+
+                var resolved = ConvertPreviewResourceUriForExport(
+                    WebUtility.HtmlDecode(src),
+                    exportFolder,
+                    assetsFolder,
+                    copiedImages,
+                    usedAssetNames);
+                return match.Groups[1].Value
+                    + "\""
+                    + WebUtility.HtmlEncode(resolved)
+                    + "\"";
+            },
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private string ConvertPreviewResourceUriForExport(
+        string source,
+        string exportFolder,
+        string assetsFolder,
+        Dictionary<string, string> copiedImages,
+        HashSet<string> usedAssetNames)
+    {
+        if (!Uri.TryCreate(source, UriKind.Absolute, out var uri))
+        {
+            return source;
+        }
+
+        string? localPath = null;
+        if (uri.Host.Equals(LocalImageHost, StringComparison.OrdinalIgnoreCase))
+        {
+            localPath = GetLocalPathFromLocalImageUri(uri);
+        }
+        else if (uri.Host.Equals(DocumentHost, StringComparison.OrdinalIgnoreCase))
+        {
+            localPath = GetLocalPathFromPreviewUri(uri);
+        }
+
+        if (localPath is null || !File.Exists(localPath) || !IsImageFile(localPath))
+        {
+            return source;
+        }
+
+        return CopyImageForHtmlExport(localPath, exportFolder, assetsFolder, copiedImages, usedAssetNames);
+    }
+
+    private static string CopyImageForHtmlExport(
+        string localPath,
+        string exportFolder,
+        string assetsFolder,
+        Dictionary<string, string> copiedImages,
+        HashSet<string> usedAssetNames)
+    {
+        var fullPath = Path.GetFullPath(localPath);
+        if (copiedImages.TryGetValue(fullPath, out var existingRelativePath))
+        {
+            return existingRelativePath;
+        }
+
+        Directory.CreateDirectory(assetsFolder);
+        var assetName = GetUniqueExportAssetFileName(fullPath, usedAssetNames);
+        var targetPath = Path.Combine(assetsFolder, assetName);
+        var fullTargetPath = Path.GetFullPath(targetPath);
+        if (!fullPath.Equals(fullTargetPath, StringComparison.OrdinalIgnoreCase))
+        {
+            File.Copy(fullPath, fullTargetPath, overwrite: true);
+        }
+
+        var relativePath = ToHtmlRelativeUrl(Path.GetRelativePath(exportFolder, fullTargetPath));
+        copiedImages[fullPath] = relativePath;
+        return relativePath;
+    }
+
+    private static string GetUniqueExportAssetFileName(string fullPath, HashSet<string> usedAssetNames)
+    {
+        var fileName = Path.GetFileName(fullPath);
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            fileName = "image" + Path.GetExtension(fullPath);
+        }
+
+        if (usedAssetNames.Add(fileName))
+        {
+            return fileName;
+        }
+
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        var extension = Path.GetExtension(fileName);
+        if (string.IsNullOrWhiteSpace(stem))
+        {
+            stem = "image";
+        }
+
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullPath))).ToLowerInvariant();
+        var candidate = $"{stem}-{hash[..8]}{extension}";
+        var counter = 2;
+        while (!usedAssetNames.Add(candidate))
+        {
+            candidate = $"{stem}-{hash[..8]}-{counter++}{extension}";
+        }
+
+        return candidate;
+    }
+
+    private static string ToHtmlRelativeUrl(string relativePath)
+    {
+        return string.Join(
+            "/",
+            relativePath
+                .Replace('\\', '/')
+                .Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Select(Uri.EscapeDataString));
+    }
+
+    private string GetDefaultExportFileName(string extension)
+    {
+        var name = _currentFilePath is null
+            ? "Untitled"
+            : Path.GetFileNameWithoutExtension(_currentFilePath);
+        return (string.IsNullOrWhiteSpace(name) ? "Untitled" : name) + extension;
+    }
+
+    private string InlineCssFontUrls(string css, string assetBase)
+    {
+        return Regex.Replace(
+            css,
+            "url\\(([^)]+)\\)",
+            match =>
+            {
+                var path = match.Groups[1].Value.Trim().Trim('"', '\'');
+                if (path.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                {
+                    return match.Value;
+                }
+
+                var key = assetBase + path.Replace('\\', '/').TrimStart('/');
+                var bytes = ReadEmbeddedAssetBytes(key);
+                if (bytes is null)
+                {
+                    return match.Value;
+                }
+
+                var mime = GetAssetMimeType(path).Split(';', 2)[0];
+                return $"url(data:{mime};base64,{Convert.ToBase64String(bytes)})";
+            },
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private static string ReadEmbeddedAssetText(string key)
+    {
+        var bytes = ReadEmbeddedAssetBytes(key);
+        return bytes is null ? string.Empty : Encoding.UTF8.GetString(bytes);
+    }
+
+    private static byte[]? ReadEmbeddedAssetBytes(string key)
+    {
+        if (!EmbeddedAssetNames.Value.TryGetValue(key.Replace('\\', '/'), out var resourceName))
+        {
+            return null;
+        }
+
+        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName);
+        if (stream is null)
+        {
+            return null;
+        }
+
+        using var memory = new MemoryStream();
+        stream.CopyTo(memory);
+        return memory.ToArray();
+    }
+
     private void ShowFindBar()
     {
+        RefreshSearchTargetFromFocus();
+        var target = GetEffectiveSearchTarget();
+        SetSearchTarget(target);
+
         FindBar.Visibility = Visibility.Visible;
-        if (string.IsNullOrEmpty(FindTextBox.Text) && Editor.SelectedText.Length > 0)
+        if (target == SearchTarget.Editor
+            && string.IsNullOrEmpty(FindTextBox.Text)
+            && Editor.SelectedText.Length > 0)
         {
             FindTextBox.Text = Editor.SelectedText;
         }
@@ -5732,14 +6423,7 @@ refreshEnhancements(document);
     private void HideFindBar()
     {
         FindBar.Visibility = Visibility.Collapsed;
-        if (_wysiwygMode)
-        {
-            Wysiwyg.Focus();
-        }
-        else
-        {
-            Editor.TextArea.Focus();
-        }
+        FocusSearchTarget(GetEffectiveSearchTarget());
     }
 
     private async Task FindAsync(bool backwards)
@@ -5751,25 +6435,91 @@ refreshEnhancements(document);
             return;
         }
 
-        if (_wysiwygMode && Wysiwyg.Visibility == Visibility.Visible)
+        RefreshSearchTargetFromFocus();
+        var target = GetEffectiveSearchTarget();
+        SetSearchTarget(target);
+
+        if (target == SearchTarget.Wysiwyg)
         {
             await FindInWebViewAsync(Wysiwyg, query, backwards, "WYSIWYG editor");
             return;
         }
 
-        if (_viewMode != ViewMode.PreviewOnly && (Editor.TextArea.IsKeyboardFocusWithin || _viewMode == ViewMode.EditorOnly))
-        {
-            FindInEditor(query, backwards);
-            return;
-        }
-
-        if (_previewReady && Preview.Visibility == Visibility.Visible)
+        if (target == SearchTarget.Preview)
         {
             await FindInWebViewAsync(Preview, query, backwards, "preview");
             return;
         }
 
         FindInEditor(query, backwards);
+    }
+
+    private void RefreshSearchTargetFromFocus()
+    {
+        if (_wysiwygMode && Wysiwyg.Visibility == Visibility.Visible && Wysiwyg.IsKeyboardFocusWithin)
+        {
+            SetSearchTarget(SearchTarget.Wysiwyg);
+            return;
+        }
+
+        if (!_wysiwygMode && Editor.Visibility == Visibility.Visible && Editor.IsKeyboardFocusWithin)
+        {
+            SetSearchTarget(SearchTarget.Editor);
+            return;
+        }
+
+        if (!_wysiwygMode && Preview.Visibility == Visibility.Visible && Preview.IsKeyboardFocusWithin)
+        {
+            SetSearchTarget(SearchTarget.Preview);
+        }
+    }
+
+    private SearchTarget GetEffectiveSearchTarget()
+    {
+        if (_wysiwygMode && Wysiwyg.Visibility == Visibility.Visible)
+        {
+            return SearchTarget.Wysiwyg;
+        }
+
+        if (_viewMode == ViewMode.PreviewOnly)
+        {
+            return _previewReady && Preview.Visibility == Visibility.Visible
+                ? SearchTarget.Preview
+                : SearchTarget.Editor;
+        }
+
+        if (_viewMode == ViewMode.EditorOnly)
+        {
+            return SearchTarget.Editor;
+        }
+
+        if (_searchTarget == SearchTarget.Preview && _previewReady && Preview.Visibility == Visibility.Visible)
+        {
+            return SearchTarget.Preview;
+        }
+
+        return SearchTarget.Editor;
+    }
+
+    private void FocusSearchTarget(SearchTarget target)
+    {
+        switch (target)
+        {
+            case SearchTarget.Wysiwyg when Wysiwyg.Visibility == Visibility.Visible:
+                Wysiwyg.Focus();
+                break;
+            case SearchTarget.Preview when Preview.Visibility == Visibility.Visible:
+                Preview.Focus();
+                break;
+            default:
+                Editor.TextArea.Focus();
+                break;
+        }
+    }
+
+    private void SetSearchTarget(SearchTarget target)
+    {
+        _searchTarget = target;
     }
 
     private void FindInEditor(string query, bool backwards)
@@ -5808,6 +6558,7 @@ refreshEnhancements(document);
             return;
         }
 
+        SetSearchTarget(SearchTarget.Editor);
         Editor.TextArea.Focus();
         Editor.Select(index, query.Length);
         var line = Editor.Document.GetLineByOffset(index);
@@ -5827,6 +6578,7 @@ refreshEnhancements(document);
         var script = $"window.find({search}, false, {direction}, true, false, false, false);";
         var result = await webView.ExecuteScriptAsync(script);
         StatusText.Text = result == "true" ? $"Found \"{query}\" in {targetName}" : $"No matches for \"{query}\"";
+        SetSearchTarget(webView == Wysiwyg ? SearchTarget.Wysiwyg : SearchTarget.Preview);
         webView.Focus();
     }
 
@@ -6068,6 +6820,12 @@ refreshEnhancements(document);
             return;
         }
 
+        if (string.Equals(message?.Type, "wysiwygFocus", StringComparison.OrdinalIgnoreCase))
+        {
+            SetSearchTarget(SearchTarget.Wysiwyg);
+            return;
+        }
+
         if (string.Equals(message?.Type, "undo", StringComparison.OrdinalIgnoreCase))
         {
             _ = UndoWysiwygAsync(message!.Markdown);
@@ -6116,6 +6874,12 @@ refreshEnhancements(document);
 
         if (HandleWebZoomMessage(message?.Type))
         {
+            return;
+        }
+
+        if (string.Equals(message?.Type, "previewFocus", StringComparison.OrdinalIgnoreCase))
+        {
+            SetSearchTarget(SearchTarget.Preview);
             return;
         }
 
@@ -6623,6 +7387,13 @@ refreshEnhancements(document);
         PreviewOnly
     }
 
+    private enum SearchTarget
+    {
+        Editor,
+        Preview,
+        Wysiwyg
+    }
+
     private enum ThemeMode
     {
         Normal,
@@ -6642,6 +7413,7 @@ refreshEnhancements(document);
     private sealed record AppSettings(
         string? EditorFontFamily,
         double? EditorFontSize,
+        double? EditorLineSpacing,
         double? WebViewDefaultZoom,
         double? PreviewZoom,
         double? WysiwygZoom,
@@ -6858,6 +7630,30 @@ refreshEnhancements(document);
         {
             return fallback;
         }
+    }
+
+    private static double ContrastRatio(string firstHex, string secondHex)
+    {
+        var first = RelativeLuminance(ParseThemeColor(firstHex, Colors.White));
+        var second = RelativeLuminance(ParseThemeColor(secondHex, Colors.Black));
+        var lighter = Math.Max(first, second);
+        var darker = Math.Min(first, second);
+        return (lighter + 0.05) / (darker + 0.05);
+    }
+
+    private static double RelativeLuminance(Color color)
+    {
+        static double Channel(byte channel)
+        {
+            var value = channel / 255.0;
+            return value <= 0.03928
+                ? value / 12.92
+                : Math.Pow((value + 0.055) / 1.055, 2.4);
+        }
+
+        return 0.2126 * Channel(color.R)
+            + 0.7152 * Channel(color.G)
+            + 0.0722 * Channel(color.B);
     }
 
     private static string ColorToHex(Color color)

@@ -35,3 +35,7 @@ coverage/
 *.cache
 *.WebView2/
 **/*.WebView2/
+
+# Local notes / scratch assets
+todo.md
+ChatGPT Image*.jpg

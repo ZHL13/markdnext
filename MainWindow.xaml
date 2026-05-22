@@ -410,9 +410,12 @@
                 <MenuItem Header="_Reload From Disk" InputGestureText="F5" Click="Reload_Click" />
                 <Separator />
                 <MenuItem Header="_Print..." InputGestureText="Ctrl+P" Click="Print_Click" />
-                <MenuItem Header="_Export..." Click="Export_Click" />
+                <MenuItem Header="_Export">
+                    <MenuItem Header="_HTML..." Click="ExportHtml_Click" />
+                    <MenuItem Header="_PDF..." Click="ExportPdf_Click" />
+                </MenuItem>
                 <Separator />
-                <MenuItem Header="E_xit" Click="Exit_Click" />
+                <MenuItem Header="_Close Window" InputGestureText="Ctrl+W" Click="Exit_Click" />
             </MenuItem>
             <MenuItem Header="_Edit">
                 <MenuItem Header="_Undo" InputGestureText="Ctrl+Z" Click="Undo_Click" />
@@ -427,13 +430,13 @@
                 <MenuItem Header="Find _Previous" InputGestureText="Shift+F3" Click="FindPrevious_Click" />
                 <MenuItem Header="Insert _Image..." Click="InsertImage_Click" />
                 <Separator />
-                <MenuItem x:Name="AutoCompletionMenuItem" Header="_Automatic Completion" IsCheckable="True" Click="AutoCompletion_Click" />
+                <MenuItem x:Name="AutoCompletionMenuItem" Header="_Automatic Completion" InputGestureText="Ctrl+H" IsCheckable="True" Click="AutoCompletion_Click" />
             </MenuItem>
             <MenuItem Header="_View">
                 <MenuItem x:Name="WysiwygModeMenuItem" Header="_WYSIWYG" IsCheckable="True" Click="WysiwygMode_Click" />
                 <MenuItem x:Name="ViewBothMenuItem" Header="_Split View" IsCheckable="True" IsChecked="True" Click="SplitMode_Click" />
                 <MenuItem x:Name="ViewPreviewMenuItem" Header="_Preview Only" IsCheckable="True" Click="PreviewMode_Click" />
-                <MenuItem x:Name="HideMenuBarMenuItem" Header="_Hide Menu Bar" IsCheckable="True" IsChecked="True" Click="HideMenuBar_Click" />
+                <MenuItem x:Name="HideMenuBarMenuItem" Header="_Hide Menu Bar" IsCheckable="True" Click="HideMenuBar_Click" />
                 <Separator />
                 <MenuItem x:Name="WordWrapMenuItem" Header="_Word Wrap" IsCheckable="True" IsChecked="True" Click="WordWrap_Click" />
                 <Separator />

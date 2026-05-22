@@ -1,6 +1,6 @@
 # MarkDNext
 
-MarkDNext is a native Windows Markdown editor and viewer inspired by the MDV app at https://www.mowglii.com/mdv/.
+MarkDNext is a native Windows Markdown editor and viewer. It was vibe-coded with help from Codex, and is inspired by MDV, MarkText, and ghostwriter.
 
 ## Features
 
@@ -15,36 +15,38 @@ MarkDNext is a native Windows Markdown editor and viewer inspired by the MDV app
 - Live WebView2 preview with off-screen KaTeX/code rendering before content is swapped into view.
 - GitHub-style Markdown rendering through Markdig advanced extensions.
 - Source editor highlighting and completion through AvalonEdit.
-- Automatic completion is optional from `Edit -> Automatic Completion`; `Ctrl+Space` always opens manual snippets in source mode.
+- Automatic completion is optional from `Edit -> Automatic Completion`; `Ctrl+H` toggles it in source mode.
 - Offline code highlighting through bundled highlight.js assets.
 - KaTeX rendering for inline `$\\alpha$` and display `$$\\alpha$$` formulas.
 - Auto reloads the file when it is changed on disk and the editor has no unsaved changes.
 - Find in editor or preview.
-- Print from the File menu, or use `File -> Export...` and choose `Microsoft Print to PDF` to create a PDF.
+- Print from the File menu, or use `File -> Export` to export HTML or PDF. HTML export copies local images beside the document under an `assets` folder.
 - Relative images and links resolve from the Markdown file folder.
 - Theme menu with Mica and Acrylic window backdrop options when supported by Windows, with a flat fallback.
 
 ## Build
 
-This repo includes a local .NET SDK under `.dotnet` because the machine only had .NET runtimes installed.
+Install the .NET 8 SDK, then build from the repository root:
 
 ```powershell
-.\.dotnet\dotnet.exe build -c Release
+dotnet build -c Release
 ```
 
 ## Publish
 
-Release publishing is configured in `MDV4Windows.csproj` as a self-contained, compressed single-file Windows x64 build.
+Release publishing is configured in `MarkDNext.csproj` as a self-contained, compressed single-file Windows x64 build.
 
 ```powershell
-.\.dotnet\dotnet.exe publish -c Release
+dotnet publish -c Release
 ```
 
-The published app is created under:
+The standalone executable is created at:
 
 ```text
 dist\MarkDNext.exe
 ```
+
+License and third-party notice files are copied to `dist` alongside the executable.
 
 Run it from Explorer or from a terminal:
 
@@ -53,3 +55,9 @@ Run it from Explorer or from a terminal:
 ```
 
 The preview requires Microsoft Edge WebView2 Runtime, which is already present on most current Windows 10/11 systems.
+
+## License
+
+MarkDNext is licensed under the Apache License, Version 2.0. See `LICENSE` and `NOTICE`.
+
+This repository also includes third-party dependencies and bundled offline rendering assets. See `THIRD_PARTY_NOTICES.md` before redistributing source or binary builds.

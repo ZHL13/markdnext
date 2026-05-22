@@ -41,8 +41,8 @@ $$
 
 ## Completion
 
-Press `Ctrl+Space` in the source editor to insert common Markdown snippets.
+Press `Ctrl+H` in the source editor to toggle automatic completion.
 
 In WYSIWYG mode, the editor itself becomes the rendered document. Click a block to edit it, or type `/` in an empty focused block for block commands. Code blocks open as a language field plus code body editor.
 
-Automatic completion is off by default. Use `Edit -> Automatic Completion` to enable it, or press `Ctrl+Space` for manual snippets.
+Automatic completion is off by default. Use `Edit -> Automatic Completion` or press `Ctrl+H` to toggle it.
