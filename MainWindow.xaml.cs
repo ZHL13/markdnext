@@ -70,6 +70,7 @@ public partial class MainWindow : Window
     private double _webEditorFontSize = 18;
     private string _contentFontFamily = "Segoe UI";
     private double _contentFontSize = 20;
+    private double _webViewDefaultZoom = 1.0;
     private string _currentThemeId = DefaultThemeId;
     private string _linkColor = "#376f99";
     private ThemeMode _themeMode = ThemeMode.Normal;
@@ -140,10 +141,9 @@ public partial class MainWindow : Window
         {
             await Preview.EnsureCoreWebView2Async();
             Preview.CoreWebView2.Settings.IsStatusBarEnabled = false;
-            Preview.CoreWebView2.Settings.IsZoomControlEnabled = false;
-            Preview.CoreWebView2.Settings.IsPinchZoomEnabled = false;
-            Preview.ZoomFactor = 1.0;
-            Preview.ZoomFactorChanged += WebView_ZoomFactorChanged;
+            Preview.CoreWebView2.Settings.IsZoomControlEnabled = true;
+            Preview.CoreWebView2.Settings.IsPinchZoomEnabled = true;
+            Preview.ZoomFactor = _webViewDefaultZoom;
             Preview.CoreWebView2.NavigationStarting += Preview_NavigationStarting;
             Preview.CoreWebView2.WebMessageReceived += Preview_WebMessageReceived;
             ConfigureDocumentResourceHandler(Preview.CoreWebView2);
@@ -166,10 +166,9 @@ public partial class MainWindow : Window
         {
             await Wysiwyg.EnsureCoreWebView2Async();
             Wysiwyg.CoreWebView2.Settings.IsStatusBarEnabled = false;
-            Wysiwyg.CoreWebView2.Settings.IsZoomControlEnabled = false;
-            Wysiwyg.CoreWebView2.Settings.IsPinchZoomEnabled = false;
-            Wysiwyg.ZoomFactor = 1.0;
-            Wysiwyg.ZoomFactorChanged += WebView_ZoomFactorChanged;
+            Wysiwyg.CoreWebView2.Settings.IsZoomControlEnabled = true;
+            Wysiwyg.CoreWebView2.Settings.IsPinchZoomEnabled = true;
+            Wysiwyg.ZoomFactor = _webViewDefaultZoom;
             Wysiwyg.CoreWebView2.NavigationStarting += Preview_NavigationStarting;
             Wysiwyg.CoreWebView2.WebMessageReceived += Wysiwyg_WebMessageReceived;
             ConfigureDocumentResourceHandler(Wysiwyg.CoreWebView2);
@@ -180,14 +179,6 @@ public partial class MainWindow : Window
         {
             _wysiwygReady = false;
             Debug.WriteLine(ex);
-        }
-    }
-
-    private void WebView_ZoomFactorChanged(object? sender, EventArgs e)
-    {
-        if (sender is WpfWebView2 webView && Math.Abs(webView.ZoomFactor - 1.0) > 0.001)
-        {
-            webView.ZoomFactor = 1.0;
         }
     }
 
@@ -436,6 +427,7 @@ public partial class MainWindow : Window
         var originalEditorFontSize = _editorFontSize;
         var originalWebEditorFontSize = _webEditorFontSize;
         var originalContentFontSize = _contentFontSize;
+        var originalWebViewDefaultZoom = _webViewDefaultZoom;
 
         var familyBox = new ComboBox
         {
@@ -477,6 +469,12 @@ public partial class MainWindow : Window
             MinWidth = 120,
             Margin = new Thickness(0, 4, 0, 14)
         };
+        var zoomBox = new TextBox
+        {
+            Text = (_webViewDefaultZoom * 100).ToString("0", CultureInfo.InvariantCulture),
+            MinWidth = 120,
+            Margin = new Thickness(0, 4, 0, 14)
+        };
         var okButton = new Button { Content = "OK", MinWidth = 72, IsDefault = true, Margin = new Thickness(0, 0, 8, 0) };
         var cancelButton = new Button { Content = "Cancel", MinWidth = 72, IsCancel = true };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
@@ -488,6 +486,8 @@ public partial class MainWindow : Window
         panel.Children.Add(familyBox);
         panel.Children.Add(new TextBlock { Text = "Font size" });
         panel.Children.Add(sizeBox);
+        panel.Children.Add(new TextBlock { Text = "WebView default zoom (%)" });
+        panel.Children.Add(zoomBox);
         panel.Children.Add(buttons);
 
         var dialog = new Window
@@ -519,6 +519,17 @@ public partial class MainWindow : Window
             return Math.Clamp(size, 8, 48);
         }
 
+        double SelectedWebViewZoom()
+        {
+            if (!double.TryParse(zoomBox.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out var zoomPercent)
+                && !double.TryParse(zoomBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out zoomPercent))
+            {
+                zoomPercent = originalWebViewDefaultZoom * 100;
+            }
+
+            return Math.Clamp(zoomPercent / 100, 0.25, 5.0);
+        }
+
         void ApplyFontPreview()
         {
             var selectedFamily = SelectedFamily();
@@ -527,16 +538,19 @@ public partial class MainWindow : Window
             _editorFontSize = SelectedSize();
             _webEditorFontSize = _editorFontSize;
             _contentFontSize = Math.Clamp(_editorFontSize + 2, 10, 54);
+            _webViewDefaultZoom = SelectedWebViewZoom();
             ApplyAppearance();
+            ApplyWebViewDefaultZoom();
             RefreshRenderedShells();
         }
 
         familyBox.SelectionChanged += (_, _) => ApplyFontPreview();
         sizeBox.TextChanged += (_, _) => ApplyFontPreview();
+        zoomBox.TextChanged += (_, _) => ApplyFontPreview();
 
         if (dialog.ShowDialog() == true)
         {
-            StatusText.Text = $"Font changed to {_editorFontFamily}";
+            StatusText.Text = $"Font changed to {_editorFontFamily}; WebView zoom {(_webViewDefaultZoom * 100).ToString("0", CultureInfo.InvariantCulture)}%";
             return;
         }
 
@@ -545,7 +559,9 @@ public partial class MainWindow : Window
         _editorFontSize = originalEditorFontSize;
         _webEditorFontSize = originalWebEditorFontSize;
         _contentFontSize = originalContentFontSize;
+        _webViewDefaultZoom = originalWebViewDefaultZoom;
         ApplyAppearance();
+        ApplyWebViewDefaultZoom();
         RefreshRenderedShells();
     }
 
@@ -566,7 +582,9 @@ public partial class MainWindow : Window
         _editorFontSize = 18;
         _webEditorFontSize = 18;
         _contentFontSize = 20;
+        _webViewDefaultZoom = 1.0;
         ApplyAppearance();
+        ApplyWebViewDefaultZoom();
         RefreshRenderedShells();
         StatusText.Text = "Font reset.";
     }
@@ -692,6 +710,41 @@ public partial class MainWindow : Window
             ResizeMode = ResizeMode.NoResize
         };
 
+        void ApplyThemeDialogAppearance()
+        {
+            var listBackground = BrushFromHex(_colorProfile.Page);
+            var surface = BrushFromHex(_colorProfile.Surface);
+            var text = BrushFromHex(_colorProfile.Text);
+            var muted = BrushFromHex(_colorProfile.Muted);
+            var line = BrushFromHex(_colorProfile.Line);
+
+            dialog.Background = surface;
+            panel.Background = surface;
+            list.Background = listBackground;
+            list.Foreground = text;
+            list.BorderBrush = line;
+            normalButton.Foreground = text;
+            darkButton.Foreground = text;
+            okButton.Foreground = text;
+            cancelButton.Foreground = text;
+            okButton.Background = BrushFromHex(_colorProfile.Chrome);
+            cancelButton.Background = BrushFromHex(_colorProfile.Chrome);
+            okButton.BorderBrush = line;
+            cancelButton.BorderBrush = line;
+
+            foreach (var child in panel.Children.OfType<TextBlock>())
+            {
+                child.Foreground = muted;
+            }
+
+            foreach (var item in list.Items.OfType<ListBoxItem>())
+            {
+                item.Background = Brushes.Transparent;
+                item.Foreground = text;
+                item.BorderBrush = line;
+            }
+        }
+
         void PopulateThemeList(string selectedId)
         {
             list.Items.Clear();
@@ -726,6 +779,7 @@ public partial class MainWindow : Window
 
             _currentThemeId = theme.Id;
             ApplySelectedTheme();
+            ApplyThemeDialogAppearance();
         }
 
         list.SelectionChanged += (_, _) => ApplySelection();
@@ -744,6 +798,7 @@ public partial class MainWindow : Window
         okButton.Click += (_, _) => dialog.DialogResult = true;
 
         PopulateThemeList(_currentThemeId);
+        ApplyThemeDialogAppearance();
 
         if (dialog.ShowDialog() == true)
         {
@@ -888,24 +943,60 @@ public partial class MainWindow : Window
         StatusText.Text = $"Editor font size: {_editorFontSize.ToString("0.#", CultureInfo.InvariantCulture)}";
     }
 
-    private void AdjustWebFontSize(double delta)
+    private void AdjustWebViewZoom(double delta)
     {
-        _contentFontSize = Math.Clamp(_contentFontSize + delta, 10, 54);
-        _webEditorFontSize = Math.Clamp(_webEditorFontSize + delta, 8, 48);
-        RefreshRenderedShells();
-        StatusText.Text = $"Preview font size: {_contentFontSize.ToString("0.#", CultureInfo.InvariantCulture)}";
+        var webView = FocusedWebView() ?? (_wysiwygMode ? Wysiwyg : Preview);
+        SetWebViewZoom(webView, webView.ZoomFactor + delta, updateDefault: false);
     }
 
     private void AdjustFocusedFontSize(double delta)
     {
         if (_wysiwygMode || _viewMode == ViewMode.PreviewOnly || Preview.IsKeyboardFocusWithin || Wysiwyg.IsKeyboardFocusWithin)
         {
-            AdjustWebFontSize(delta);
+            AdjustWebViewZoom(delta * 0.1);
         }
         else
         {
             AdjustSourceFontSize(delta);
         }
+    }
+
+    private WpfWebView2? FocusedWebView()
+    {
+        if (Wysiwyg.Visibility == Visibility.Visible && Wysiwyg.IsKeyboardFocusWithin)
+        {
+            return Wysiwyg;
+        }
+
+        if (Preview.Visibility == Visibility.Visible && Preview.IsKeyboardFocusWithin)
+        {
+            return Preview;
+        }
+
+        return null;
+    }
+
+    private void ApplyWebViewDefaultZoom()
+    {
+        SetWebViewZoom(Preview, _webViewDefaultZoom, updateDefault: false);
+        SetWebViewZoom(Wysiwyg, _webViewDefaultZoom, updateDefault: false);
+    }
+
+    private void SetWebViewZoom(WpfWebView2 webView, double zoomFactor, bool updateDefault = true)
+    {
+        if (webView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        var zoom = Math.Clamp(zoomFactor, 0.25, 5.0);
+        webView.ZoomFactor = zoom;
+        if (updateDefault)
+        {
+            _webViewDefaultZoom = zoom;
+        }
+
+        StatusText.Text = $"WebView zoom: {(zoom * 100).ToString("0", CultureInfo.InvariantCulture)}%";
     }
 
     private void ApplyAppearance()
@@ -941,7 +1032,7 @@ public partial class MainWindow : Window
 
         _markdownColorizer.ApplyTheme(
             _colorProfile.Heading,
-            _linkColor,
+            EditorLinkColor(),
             _colorProfile.Muted,
             _colorProfile.Accent,
             _colorProfile.Heading,
@@ -957,12 +1048,20 @@ public partial class MainWindow : Window
         UpdateMenuBarVisibility();
     }
 
+    private string EditorLinkColor()
+    {
+        return MixColors(_linkColor, _colorProfile.Muted, _themeMode == ThemeMode.Dark ? 0.48 : 0.38);
+    }
+
     private void UpdateThemeBrushResources()
     {
         var selection = MixColors(_colorProfile.Chrome, _colorProfile.Accent, _themeMode == ThemeMode.Dark ? 0.34 : 0.16);
         var menuBackground = _themeMode == ThemeMode.Dark
-            ? MixColors(_colorProfile.Page, "#000000", 0.28)
+            ? MixColors(_colorProfile.Page, "#000000", 0.48)
             : _colorProfile.Surface;
+        var menuBorder = _themeMode == ThemeMode.Dark
+            ? MixColors(menuBackground, _colorProfile.Text, 0.20)
+            : MixColors(menuBackground, _colorProfile.Text, 0.18);
         var scrollbarThumb = MixColors(_colorProfile.Surface, _colorProfile.Text, _themeMode == ThemeMode.Dark ? 0.22 : 0.16);
         var scrollbarThumbHover = MixColors(_colorProfile.Surface, _colorProfile.Text, _themeMode == ThemeMode.Dark ? 0.30 : 0.24);
 
@@ -972,6 +1071,7 @@ public partial class MainWindow : Window
         RootDock.Resources["ThemeSurfaceBrush"] = BrushFromHex(_colorProfile.Surface);
         RootDock.Resources["ThemeChromeBrush"] = BrushFromHex(_colorProfile.Chrome);
         RootDock.Resources["ThemeMenuBrush"] = BrushFromHex(menuBackground);
+        RootDock.Resources["ThemeMenuBorderBrush"] = BrushFromHex(menuBorder);
         RootDock.Resources["ThemeSelectionBrush"] = BrushFromHex(selection);
         RootDock.Resources["ThemeScrollbarThumbBrush"] = BrushFromHex(scrollbarThumb);
         RootDock.Resources["ThemeScrollbarThumbHoverBrush"] = BrushFromHex(scrollbarThumbHover);
@@ -980,8 +1080,8 @@ public partial class MainWindow : Window
         RootDock.Resources[SystemColors.MenuBarBrushKey] = BrushFromHex(_colorProfile.Chrome);
         RootDock.Resources[SystemColors.MenuTextBrushKey] = BrushFromHex(_colorProfile.Text);
         RootDock.Resources[SystemColors.ControlBrushKey] = BrushFromHex(menuBackground);
-        RootDock.Resources[SystemColors.ControlDarkBrushKey] = BrushFromHex(menuBackground);
-        RootDock.Resources[SystemColors.ControlDarkDarkBrushKey] = BrushFromHex(menuBackground);
+        RootDock.Resources[SystemColors.ControlDarkBrushKey] = BrushFromHex(menuBorder);
+        RootDock.Resources[SystemColors.ControlDarkDarkBrushKey] = BrushFromHex(menuBorder);
         RootDock.Resources[SystemColors.ControlLightBrushKey] = BrushFromHex(menuBackground);
         RootDock.Resources[SystemColors.ControlLightLightBrushKey] = BrushFromHex(menuBackground);
         RootDock.Resources[SystemColors.ControlTextBrushKey] = BrushFromHex(_colorProfile.Text);
@@ -990,13 +1090,15 @@ public partial class MainWindow : Window
         RootDock.Resources[SystemColors.WindowBrushKey] = BrushFromHex(menuBackground);
         RootDock.Resources[SystemColors.WindowTextBrushKey] = BrushFromHex(_colorProfile.Text);
         RootDock.Resources[SystemColors.GrayTextBrushKey] = BrushFromHex(_colorProfile.Muted);
+        RootDock.Resources[SystemColors.ActiveBorderBrushKey] = BrushFromHex(menuBorder);
+        RootDock.Resources[SystemColors.InactiveBorderBrushKey] = BrushFromHex(menuBorder);
 
         Resources[SystemColors.MenuBrushKey] = BrushFromHex(menuBackground);
         Resources[SystemColors.MenuBarBrushKey] = BrushFromHex(_colorProfile.Chrome);
         Resources[SystemColors.MenuTextBrushKey] = BrushFromHex(_colorProfile.Text);
         Resources[SystemColors.ControlBrushKey] = BrushFromHex(menuBackground);
-        Resources[SystemColors.ControlDarkBrushKey] = BrushFromHex(menuBackground);
-        Resources[SystemColors.ControlDarkDarkBrushKey] = BrushFromHex(menuBackground);
+        Resources[SystemColors.ControlDarkBrushKey] = BrushFromHex(menuBorder);
+        Resources[SystemColors.ControlDarkDarkBrushKey] = BrushFromHex(menuBorder);
         Resources[SystemColors.ControlLightBrushKey] = BrushFromHex(menuBackground);
         Resources[SystemColors.ControlLightLightBrushKey] = BrushFromHex(menuBackground);
         Resources[SystemColors.ControlTextBrushKey] = BrushFromHex(_colorProfile.Text);
@@ -1005,6 +1107,8 @@ public partial class MainWindow : Window
         Resources[SystemColors.WindowBrushKey] = BrushFromHex(menuBackground);
         Resources[SystemColors.WindowTextBrushKey] = BrushFromHex(_colorProfile.Text);
         Resources[SystemColors.GrayTextBrushKey] = BrushFromHex(_colorProfile.Muted);
+        Resources[SystemColors.ActiveBorderBrushKey] = BrushFromHex(menuBorder);
+        Resources[SystemColors.InactiveBorderBrushKey] = BrushFromHex(menuBorder);
 
         if (Application.Current is not null)
         {
@@ -1012,8 +1116,8 @@ public partial class MainWindow : Window
             Application.Current.Resources[SystemColors.MenuBarBrushKey] = BrushFromHex(_colorProfile.Chrome);
             Application.Current.Resources[SystemColors.MenuTextBrushKey] = BrushFromHex(_colorProfile.Text);
             Application.Current.Resources[SystemColors.ControlBrushKey] = BrushFromHex(menuBackground);
-            Application.Current.Resources[SystemColors.ControlDarkBrushKey] = BrushFromHex(menuBackground);
-            Application.Current.Resources[SystemColors.ControlDarkDarkBrushKey] = BrushFromHex(menuBackground);
+            Application.Current.Resources[SystemColors.ControlDarkBrushKey] = BrushFromHex(menuBorder);
+            Application.Current.Resources[SystemColors.ControlDarkDarkBrushKey] = BrushFromHex(menuBorder);
             Application.Current.Resources[SystemColors.ControlLightBrushKey] = BrushFromHex(menuBackground);
             Application.Current.Resources[SystemColors.ControlLightLightBrushKey] = BrushFromHex(menuBackground);
             Application.Current.Resources[SystemColors.ControlTextBrushKey] = BrushFromHex(_colorProfile.Text);
@@ -1022,6 +1126,8 @@ public partial class MainWindow : Window
             Application.Current.Resources[SystemColors.WindowBrushKey] = BrushFromHex(menuBackground);
             Application.Current.Resources[SystemColors.WindowTextBrushKey] = BrushFromHex(_colorProfile.Text);
             Application.Current.Resources[SystemColors.GrayTextBrushKey] = BrushFromHex(_colorProfile.Muted);
+            Application.Current.Resources[SystemColors.ActiveBorderBrushKey] = BrushFromHex(menuBorder);
+            Application.Current.Resources[SystemColors.InactiveBorderBrushKey] = BrushFromHex(menuBorder);
         }
     }
 
@@ -2455,36 +2561,6 @@ html, body {
 <script nonce="{{nonce}}">
 let previewRenderToken = 0;
 
-function postZoom(type) {
-  if (window.chrome && window.chrome.webview) {
-    window.chrome.webview.postMessage({ type: type });
-  }
-}
-
-document.addEventListener('wheel', function (event) {
-  if (!event.ctrlKey) return;
-  event.preventDefault();
-  event.stopPropagation();
-  postZoom(event.deltaY < 0 ? 'zoomIn' : 'zoomOut');
-}, { capture: true, passive: false });
-
-document.addEventListener('keydown', function (event) {
-  if (!event.ctrlKey && !event.metaKey) return;
-  const key = event.key || '';
-  if (key === '+' || key === '=' || key === 'Add') {
-    event.preventDefault();
-    event.stopPropagation();
-    postZoom('zoomIn');
-  } else if (key === '-' || key === '_' || key === 'Subtract') {
-    event.preventDefault();
-    event.stopPropagation();
-    postZoom('zoomOut');
-  } else if (key === '0') {
-    event.preventDefault();
-    event.stopPropagation();
-  }
-}, true);
-
 function highlightCode(root) {
   if (!window.hljs) return;
   root.querySelectorAll('pre code').forEach(function (block) {
@@ -3205,7 +3281,7 @@ html, body {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior-x: none;
-  background: transparent;
+  background: var(--page);
   color: var(--text);
   font: {{ContentFontSizeCss}}px/1.62 {{ContentFontCss}};
 }
@@ -3627,35 +3703,11 @@ function post(type) {
   window.chrome.webview.postMessage({ type: type, markdown: markdownText() });
 }
 
-function postZoom(type) {
-  if (window.chrome && window.chrome.webview) {
-    window.chrome.webview.postMessage({ type: type, markdown: markdownText() });
-  }
-}
-
-document.addEventListener('wheel', function (event) {
-  if (!event.ctrlKey) return;
-  event.preventDefault();
-  event.stopPropagation();
-  postZoom(event.deltaY < 0 ? 'zoomIn' : 'zoomOut');
-}, { capture: true, passive: false });
-
 document.addEventListener('keydown', function (event) {
   const key = (event.key || '').toLowerCase();
   const command = event.ctrlKey || event.metaKey;
   if (!command || event.altKey) return;
-  if (key === '+' || key === '=' || key === 'add') {
-    event.preventDefault();
-    event.stopPropagation();
-    postZoom('zoomIn');
-  } else if (key === '-' || key === '_' || key === 'subtract') {
-    event.preventDefault();
-    event.stopPropagation();
-    postZoom('zoomOut');
-  } else if (key === '0') {
-    event.preventDefault();
-    event.stopPropagation();
-  } else if (key === 'z' && !event.shiftKey) {
+  if (key === 'z' && !event.shiftKey) {
     event.preventDefault();
     event.stopPropagation();
     post('undo');
@@ -5463,13 +5515,13 @@ refreshEnhancements(document);
     {
         if (string.Equals(type, "zoomIn", StringComparison.OrdinalIgnoreCase))
         {
-            AdjustWebFontSize(1);
+            AdjustWebViewZoom(0.1);
             return true;
         }
 
         if (string.Equals(type, "zoomOut", StringComparison.OrdinalIgnoreCase))
         {
-            AdjustWebFontSize(-1);
+            AdjustWebViewZoom(-0.1);
             return true;
         }
 
