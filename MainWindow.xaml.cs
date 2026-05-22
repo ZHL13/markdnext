@@ -3227,7 +3227,7 @@ window.mdvSetPreview = async function (html, sourceLine) {
             html = html.Replace(segment.Placeholder, imageHtml, StringComparison.Ordinal);
         }
 
-        return ResolveImageSources(html);
+        return ApplyImagePerformanceAttributes(ResolveImageSources(html));
     }
 
     private static bool IsFrontMatterBlock(string markdown)
@@ -3296,6 +3296,49 @@ window.mdvSetPreview = async function (html, sourceLine) {
                     + "\""
                     + WebUtility.HtmlEncode(resolved)
                     + "\"";
+            },
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private static string ApplyImagePerformanceAttributes(string html)
+    {
+        return Regex.Replace(
+            html,
+            "<img\\b[^>]*>",
+            match =>
+            {
+                var tag = match.Value;
+                var hasLoading = Regex.IsMatch(tag, "\\sloading\\s*=", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                var hasDecoding = Regex.IsMatch(tag, "\\sdecoding\\s*=", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                if (hasLoading && hasDecoding)
+                {
+                    return tag;
+                }
+
+                var insertAt = tag.LastIndexOf('>');
+                var selfClosing = Regex.Match(tag, "\\s*/\\s*>$", RegexOptions.CultureInvariant);
+                if (selfClosing.Success)
+                {
+                    insertAt = selfClosing.Index;
+                }
+
+                if (insertAt < 0)
+                {
+                    return tag;
+                }
+
+                var attributes = new StringBuilder();
+                if (!hasLoading)
+                {
+                    attributes.Append(" loading=\"lazy\"");
+                }
+
+                if (!hasDecoding)
+                {
+                    attributes.Append(" decoding=\"async\"");
+                }
+
+                return tag.Insert(insertAt, attributes.ToString());
             },
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
@@ -4303,7 +4346,7 @@ function renderInline(source) {
   });
   text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_, alt, target) {
     const src = target.trim().replace(/^<(.+)>$/, '$1').replace(/^(.+?)\s+["'][^"']+["']$/, '$1');
-    return '<img alt="' + escapeAttribute(alt) + '" src="' + escapeAttribute(resolveImageSource(src)) + '">';
+    return '<img alt="' + escapeAttribute(alt) + '" src="' + escapeAttribute(resolveImageSource(src)) + '" loading="lazy" decoding="async">';
   });
   text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, label, target) {
     return '<a href="' + escapeAttribute(target.trim()) + '">' + label + '</a>';
