@@ -67,7 +67,6 @@ public partial class MainWindow : Window
     private WindowBackdropKind _windowBackdrop = WindowBackdropKind.Flat;
     private string _editorFontFamily = "Consolas";
     private double _editorFontSize = 18;
-    private string _contentFontFamily = "Segoe UI";
     private double _contentFontSize = 20;
     private double _webViewDefaultZoom = 0.9;
     private string _currentThemeId = DefaultThemeId;
@@ -621,13 +620,22 @@ public partial class MainWindow : Window
                 return;
             }
 
+            var webFontFamilyChanged = !string.Equals(_editorFontFamily, nextEditorFamily, StringComparison.Ordinal);
+            var webZoomChanged = Math.Abs(_webViewDefaultZoom - nextWebViewDefaultZoom) >= 0.001;
             _editorFontFamily = nextEditorFamily;
             _editorFontSize = nextEditorFontSize;
             _webViewDefaultZoom = nextWebViewDefaultZoom;
             fontPreviewChanged = true;
             ApplyAppearance();
             ApplyFontDialogAppearance();
-            ApplyWebViewDefaultZoom();
+            if (webZoomChanged)
+            {
+                ApplyWebViewDefaultZoom();
+            }
+            if (webFontFamilyChanged)
+            {
+                RefreshRenderedShells();
+            }
         }
 
         familyBox.SelectionChanged += (_, _) => ApplyFontPreview();
@@ -650,11 +658,20 @@ public partial class MainWindow : Window
             return;
         }
 
+        var webFontFamilyChangedOnCancel = !string.Equals(_editorFontFamily, originalEditorFontFamily, StringComparison.Ordinal);
+        var webZoomChangedOnCancel = Math.Abs(_webViewDefaultZoom - originalWebViewDefaultZoom) >= 0.001;
         _editorFontFamily = originalEditorFontFamily;
         _editorFontSize = originalEditorFontSize;
         _webViewDefaultZoom = originalWebViewDefaultZoom;
         ApplyAppearance();
-        ApplyWebViewDefaultZoom();
+        if (webZoomChangedOnCancel)
+        {
+            ApplyWebViewDefaultZoom();
+        }
+        if (webFontFamilyChangedOnCancel)
+        {
+            RefreshRenderedShells();
+        }
     }
 
     private void IncreaseFont_Click(object sender, RoutedEventArgs e)
@@ -669,11 +686,16 @@ public partial class MainWindow : Window
 
     private void ResetFont_Click(object sender, RoutedEventArgs e)
     {
+        var webFontFamilyChanged = !string.Equals(_editorFontFamily, "Consolas", StringComparison.Ordinal);
         _editorFontFamily = "Consolas";
         _editorFontSize = 18;
         _webViewDefaultZoom = 0.9;
         ApplyAppearance();
         ApplyWebViewDefaultZoom();
+        if (webFontFamilyChanged)
+        {
+            RefreshRenderedShells();
+        }
         StatusText.Text = "Font reset.";
     }
 
@@ -1186,15 +1208,15 @@ public partial class MainWindow : Window
     private string EditorLinkColor()
     {
         return _themeMode == ThemeMode.Dark
-            ? MixColors(_colorProfile.EditorBackground, _linkColor, 0.58)
-            : MixColors(_colorProfile.EditorText, _linkColor, 0.42);
+            ? MixColors(_colorProfile.EditorBackground, _linkColor, 0.78)
+            : MixColors(_colorProfile.EditorText, _linkColor, 0.70);
     }
 
     private string EditorLinkTargetColor()
     {
         return _themeMode == ThemeMode.Dark
-            ? MixColors(_colorProfile.EditorBackground, _colorProfile.Muted, 0.74)
-            : MixColors(_colorProfile.EditorText, _colorProfile.Muted, 0.70);
+            ? MixColors(_colorProfile.EditorBackground, _linkColor, 0.54)
+            : MixColors(_colorProfile.EditorText, _linkColor, 0.46);
     }
 
     private string MenuBackgroundColor()
@@ -2465,9 +2487,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private string ContentFontCss => CssFontFamily(_contentFontFamily, "system-ui, sans-serif");
+    private string ContentFontCss => CssFontFamily(_editorFontFamily, "system-ui, sans-serif");
 
-    private string EditorFontCss => CssFontFamily("Consolas", "Consolas, \"Cascadia Mono\", \"SFMono-Regular\", monospace");
+    private string EditorFontCss => CssFontFamily(_editorFontFamily, "Consolas, \"Cascadia Mono\", \"SFMono-Regular\", monospace");
 
     private string ContentFontSizeCss => _contentFontSize.ToString("0.###", CultureInfo.InvariantCulture);
 
