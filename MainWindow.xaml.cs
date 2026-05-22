@@ -68,10 +68,15 @@ public partial class MainWindow : Window
     private string _editorFontFamily = "Consolas";
     private double _editorFontSize = 18;
     private double _webViewDefaultZoom = 0.9;
+    private double _previewZoom = 0.9;
+    private double _wysiwygZoom = 0.9;
     private string _currentThemeId = DefaultThemeId;
     private string _linkColor = "#376f99";
     private ThemeMode _themeMode = ThemeMode.Normal;
     private ColorProfile _colorProfile = ColorProfile.Default;
+    private bool _settingsReady;
+    private bool _startupWysiwygMode;
+    private ViewMode _startupViewMode = ViewMode.Both;
 
     public MainWindow()
         : this(null)
@@ -96,6 +101,7 @@ public partial class MainWindow : Window
         _watchTimer.Tick += WatchTimer_Tick;
 
         InitializeComponent();
+        LoadSettings();
         ConfigureEditor();
         ApplyAppearance();
         Loaded += MainWindow_Loaded;
@@ -130,6 +136,9 @@ public partial class MainWindow : Window
         {
             NewDocument();
         }
+
+        await ApplyStartupViewModeAsync();
+        _settingsReady = true;
     }
 
     private async Task InitializeWebViewsAsync()
@@ -143,7 +152,7 @@ public partial class MainWindow : Window
             Preview.CoreWebView2.Settings.IsStatusBarEnabled = false;
             Preview.CoreWebView2.Settings.IsZoomControlEnabled = true;
             Preview.CoreWebView2.Settings.IsPinchZoomEnabled = true;
-            Preview.ZoomFactor = _webViewDefaultZoom;
+            Preview.ZoomFactor = _previewZoom;
             Preview.ZoomFactorChanged += WebView_ZoomFactorChanged;
             Preview.CoreWebView2.NavigationStarting += Preview_NavigationStarting;
             Preview.CoreWebView2.WebMessageReceived += Preview_WebMessageReceived;
@@ -169,7 +178,7 @@ public partial class MainWindow : Window
             Wysiwyg.CoreWebView2.Settings.IsStatusBarEnabled = false;
             Wysiwyg.CoreWebView2.Settings.IsZoomControlEnabled = true;
             Wysiwyg.CoreWebView2.Settings.IsPinchZoomEnabled = true;
-            Wysiwyg.ZoomFactor = _webViewDefaultZoom;
+            Wysiwyg.ZoomFactor = _wysiwygZoom;
             Wysiwyg.ZoomFactorChanged += WebView_ZoomFactorChanged;
             Wysiwyg.CoreWebView2.NavigationStarting += Preview_NavigationStarting;
             Wysiwyg.CoreWebView2.WebMessageReceived += Wysiwyg_WebMessageReceived;
@@ -200,18 +209,184 @@ public partial class MainWindow : Window
 
     private static string GetWebViewUserDataFolder()
     {
+        return Path.Combine(GetAppDataFolder(), "WebView2");
+    }
+
+    private static string GetAppDataFolder()
+    {
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrWhiteSpace(localAppData))
         {
             localAppData = AppContext.BaseDirectory;
         }
 
-        return Path.Combine(localAppData, "MarkDNext", "WebView2");
+        return Path.Combine(localAppData, "MarkDNext");
+    }
+
+    private static string GetSettingsPath()
+    {
+        return Path.Combine(GetAppDataFolder(), "settings.json");
+    }
+
+    private void LoadSettings()
+    {
+        try
+        {
+            var path = GetSettingsPath();
+            if (!File.Exists(path))
+            {
+                _previewZoom = _webViewDefaultZoom;
+                _wysiwygZoom = _webViewDefaultZoom;
+                return;
+            }
+
+            var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path, Encoding.UTF8), JsonOptions);
+            if (settings is null)
+            {
+                return;
+            }
+
+            _editorFontFamily = string.IsNullOrWhiteSpace(settings.EditorFontFamily)
+                ? _editorFontFamily
+                : settings.EditorFontFamily.Trim();
+            _editorFontSize = Math.Clamp(settings.EditorFontSize ?? _editorFontSize, 8, 48);
+            _webViewDefaultZoom = Math.Clamp(settings.WebViewDefaultZoom ?? _webViewDefaultZoom, 0.25, 5.0);
+            _previewZoom = Math.Clamp(settings.PreviewZoom ?? _webViewDefaultZoom, 0.25, 5.0);
+            _wysiwygZoom = Math.Clamp(settings.WysiwygZoom ?? _webViewDefaultZoom, 0.25, 5.0);
+
+            if (Enum.TryParse(settings.ThemeMode, true, out ThemeMode themeMode))
+            {
+                _themeMode = themeMode;
+            }
+
+            if (Enum.TryParse(settings.WindowBackdrop, true, out WindowBackdropKind backdrop))
+            {
+                _windowBackdrop = backdrop;
+            }
+
+            _currentThemeId = settings.ThemeId ?? DefaultThemeId;
+            if (string.IsNullOrWhiteSpace(_currentThemeId) && settings.ColorProfile is not null)
+            {
+                _colorProfile = settings.ColorProfile.Normalized();
+                _linkColor = string.IsNullOrWhiteSpace(settings.LinkColor)
+                    ? LinkColorFromProfile(_colorProfile, _themeMode)
+                    : settings.LinkColor;
+            }
+            else
+            {
+                var theme = FindTheme(_currentThemeId);
+                _currentThemeId = theme.Id;
+                _colorProfile = GetThemeProfile(theme, _themeMode).Normalized();
+                _linkColor = GetThemeLinkColor(theme, _themeMode);
+            }
+
+            if (Enum.TryParse(settings.ViewMode, true, out ViewMode viewMode))
+            {
+                _startupViewMode = viewMode;
+                _viewMode = viewMode;
+            }
+
+            if (Enum.TryParse(settings.ViewModeBeforeWysiwyg, true, out ViewMode beforeWysiwyg))
+            {
+                _viewModeBeforeWysiwyg = beforeWysiwyg;
+            }
+
+            _startupWysiwygMode = settings.WysiwygMode ?? false;
+            _automaticCompletionEnabled = settings.AutomaticCompletion ?? _automaticCompletionEnabled;
+            _menuBarHidden = settings.HideMenuBar ?? _menuBarHidden;
+
+            AutoCompletionMenuItem.IsChecked = _automaticCompletionEnabled;
+            HideMenuBarMenuItem.IsChecked = _menuBarHidden;
+            if (settings.WordWrap is bool wordWrap)
+            {
+                WordWrapMenuItem.IsChecked = wordWrap;
+                Editor.WordWrap = wordWrap;
+            }
+
+            RestoreWindowPlacement(settings);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+        }
+    }
+
+    private void SaveSettings(bool force = false)
+    {
+        if (!_settingsReady && !force)
+        {
+            return;
+        }
+
+        try
+        {
+            var folder = GetAppDataFolder();
+            Directory.CreateDirectory(folder);
+
+            var bounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
+            var settings = new AppSettings(
+                _editorFontFamily,
+                _editorFontSize,
+                _webViewDefaultZoom,
+                _previewZoom,
+                _wysiwygZoom,
+                string.IsNullOrWhiteSpace(_currentThemeId) ? null : _currentThemeId,
+                _themeMode.ToString(),
+                string.IsNullOrWhiteSpace(_currentThemeId) ? _colorProfile : null,
+                string.IsNullOrWhiteSpace(_currentThemeId) ? _linkColor : null,
+                _windowBackdrop.ToString(),
+                _wysiwygMode,
+                _viewMode.ToString(),
+                _viewModeBeforeWysiwyg.ToString(),
+                _automaticCompletionEnabled,
+                _menuBarHidden,
+                WordWrapMenuItem.IsChecked,
+                WindowState == WindowState.Minimized ? WindowState.Normal.ToString() : WindowState.ToString(),
+                bounds.Left,
+                bounds.Top,
+                bounds.Width,
+                bounds.Height);
+
+            var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions(JsonOptions) { WriteIndented = true });
+            File.WriteAllText(GetSettingsPath(), json, Utf8NoBom);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+        }
+    }
+
+    private void RestoreWindowPlacement(AppSettings settings)
+    {
+        if (settings.WindowWidth is double width && double.IsFinite(width))
+        {
+            Width = Math.Max(MinWidth, width);
+        }
+
+        if (settings.WindowHeight is double height && double.IsFinite(height))
+        {
+            Height = Math.Max(MinHeight, height);
+        }
+
+        if (settings.WindowLeft is double left && double.IsFinite(left))
+        {
+            Left = left;
+        }
+
+        if (settings.WindowTop is double top && double.IsFinite(top))
+        {
+            Top = top;
+        }
+
+        if (Enum.TryParse(settings.WindowState, true, out WindowState state) && state != WindowState.Minimized)
+        {
+            WindowState = state;
+        }
     }
 
     private void Window_SourceInitialized(object sender, EventArgs e)
     {
-        SetWindowMaterial(_windowBackdrop);
+        SetWindowMaterial(_windowBackdrop, persist: false);
     }
 
     private void New_Click(object sender, RoutedEventArgs e)
@@ -382,6 +557,7 @@ public partial class MainWindow : Window
         StatusText.Text = _automaticCompletionEnabled
             ? "Automatic completion enabled"
             : "Automatic completion disabled.";
+        SaveSettings();
     }
 
     private async void SplitMode_Click(object sender, RoutedEventArgs e)
@@ -423,11 +599,13 @@ public partial class MainWindow : Window
     {
         _menuBarHidden = HideMenuBarMenuItem.IsChecked;
         UpdateMenuBarVisibility();
+        SaveSettings();
     }
 
     private void WordWrap_Click(object sender, RoutedEventArgs e)
     {
         Editor.WordWrap = WordWrapMenuItem.IsChecked;
+        SaveSettings();
     }
 
     private void Font_Click(object sender, RoutedEventArgs e)
@@ -629,7 +807,7 @@ public partial class MainWindow : Window
             ApplyFontDialogAppearance();
             if (webZoomChanged)
             {
-                ApplyWebViewDefaultZoom();
+                ApplyWebViewDefaultZoom(persist: false);
             }
             if (webFontFamilyChanged)
             {
@@ -645,6 +823,7 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog() == true)
         {
             StatusText.Text = $"Font changed to {_editorFontFamily}; WebView zoom {(_webViewDefaultZoom * 100).ToString("0", CultureInfo.InvariantCulture)}%";
+            SaveSettings();
             return;
         }
 
@@ -665,12 +844,13 @@ public partial class MainWindow : Window
         ApplyAppearance();
         if (webZoomChangedOnCancel)
         {
-            ApplyWebViewDefaultZoom();
+            ApplyWebViewDefaultZoom(persist: false);
         }
         if (webFontFamilyChangedOnCancel)
         {
             RefreshRenderedShells();
         }
+        SaveSettings();
     }
 
     private void IncreaseFont_Click(object sender, RoutedEventArgs e)
@@ -696,6 +876,7 @@ public partial class MainWindow : Window
             RefreshRenderedShells();
         }
         StatusText.Text = "Font reset.";
+        SaveSettings();
     }
 
     private void LoadColorProfile_Click(object sender, RoutedEventArgs e)
@@ -726,6 +907,7 @@ public partial class MainWindow : Window
             ApplyAppearance();
             RefreshRenderedShells();
             StatusText.Text = $"Loaded color profile {Path.GetFileName(dialog.FileName)}";
+            SaveSettings();
         }
         catch (Exception ex)
         {
@@ -764,6 +946,7 @@ public partial class MainWindow : Window
         _themeMode = ThemeMode.Normal;
         ApplySelectedTheme();
         StatusText.Text = "Color profile reset.";
+        SaveSettings();
     }
 
     private void ChooseTheme_Click(object sender, RoutedEventArgs e)
@@ -953,6 +1136,7 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog() == true)
         {
             StatusText.Text = $"Theme: {FindTheme(_currentThemeId).DisplayName} ({ThemeModeLabel(_themeMode)})";
+            SaveSettings();
             return;
         }
 
@@ -968,6 +1152,7 @@ public partial class MainWindow : Window
         _linkColor = originalLinkColor;
         ApplyAppearance();
         RefreshRenderedShells();
+        SaveSettings();
     }
 
     private ListBoxItem CreateThemeListItem(ThemeDefinition theme, ThemeMode mode)
@@ -1027,6 +1212,7 @@ public partial class MainWindow : Window
         _themeMode = mode;
         ApplySelectedTheme();
         StatusText.Text = $"{ThemeModeLabel(mode)} mode";
+        SaveSettings();
     }
 
     private void ApplySelectedTheme()
@@ -1076,10 +1262,19 @@ public partial class MainWindow : Window
 
     private void SetWindowMaterial(WindowBackdropKind kind)
     {
+        SetWindowMaterial(kind, persist: true);
+    }
+
+    private void SetWindowMaterial(WindowBackdropKind kind, bool persist)
+    {
         _windowBackdrop = kind;
         WindowBackdrop.TryApply(this, kind);
         UpdateWindowMaterialMenuChecks();
         ApplyAppearance();
+        if (persist)
+        {
+            SaveSettings();
+        }
     }
 
     private void AdjustSourceFontSize(double delta)
@@ -1087,6 +1282,7 @@ public partial class MainWindow : Window
         _editorFontSize = Math.Clamp(_editorFontSize + delta, 8, 48);
         ApplyAppearance();
         StatusText.Text = $"Editor font size: {_editorFontSize.ToString("0.#", CultureInfo.InvariantCulture)}";
+        SaveSettings();
     }
 
     private void AdjustWebViewZoom(double delta)
@@ -1110,35 +1306,58 @@ public partial class MainWindow : Window
         return null;
     }
 
-    private void ApplyWebViewDefaultZoom()
+    private void ApplyWebViewDefaultZoom(bool persist = true)
     {
-        SetWebViewZoom(Preview, _webViewDefaultZoom, updateDefault: false);
-        SetWebViewZoom(Wysiwyg, _webViewDefaultZoom, updateDefault: false);
+        SetWebViewZoom(Preview, _webViewDefaultZoom, updateDefault: false, persist: false);
+        SetWebViewZoom(Wysiwyg, _webViewDefaultZoom, updateDefault: false, persist: false);
+        if (persist)
+        {
+            SaveSettings();
+        }
     }
 
     private void ResetWebViewZoomToDefault()
     {
-        SetWebViewZoom(Preview, _webViewDefaultZoom, updateDefault: false);
-        SetWebViewZoom(Wysiwyg, _webViewDefaultZoom, updateDefault: false);
+        SetWebViewZoom(Preview, _webViewDefaultZoom, updateDefault: false, persist: false);
+        SetWebViewZoom(Wysiwyg, _webViewDefaultZoom, updateDefault: false, persist: false);
         StatusText.Text = $"WebView zoom reset to {(_webViewDefaultZoom * 100).ToString("0", CultureInfo.InvariantCulture)}%";
+        SaveSettings();
     }
 
-    private void SetWebViewZoom(WpfWebView2 webView, double zoomFactor, bool updateDefault = true)
+    private void SetWebViewZoom(WpfWebView2 webView, double zoomFactor, bool updateDefault = true, bool persist = true)
     {
-        if (webView.CoreWebView2 is null)
+        var zoom = Math.Clamp(zoomFactor, 0.25, 5.0);
+        if (ReferenceEquals(webView, Preview))
         {
-            return;
+            _previewZoom = zoom;
+        }
+        else if (ReferenceEquals(webView, Wysiwyg))
+        {
+            _wysiwygZoom = zoom;
         }
 
-        var zoom = Math.Clamp(zoomFactor, 0.25, 5.0);
-        webView.ZoomFactor = zoom;
-        ApplyWebViewLayoutZoomFactor(webView);
         if (updateDefault)
         {
             _webViewDefaultZoom = zoom;
         }
 
+        if (webView.CoreWebView2 is null)
+        {
+            if (persist)
+            {
+                SaveSettings();
+            }
+
+            return;
+        }
+
+        webView.ZoomFactor = zoom;
+        ApplyWebViewLayoutZoomFactor(webView);
         StatusText.Text = $"WebView zoom: {(zoom * 100).ToString("0", CultureInfo.InvariantCulture)}%";
+        if (persist)
+        {
+            SaveSettings();
+        }
     }
 
     private void ApplyWebViewLayoutZoomFactor(WpfWebView2 webView)
@@ -2030,6 +2249,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        SaveSettings(force: true);
         _watcher?.Dispose();
     }
 
@@ -2058,7 +2278,7 @@ public partial class MainWindow : Window
         _currentFilePath = null;
         _lastDiskWriteUtc = DateTime.MinValue;
         _isLoadingDocument = true;
-        Editor.Text = "# Untitled\r\n\r\nStart writing Markdown here.\r\n\r\nInline math: $\\alpha$.\r\n\r\n$$\\alpha$$\r\n";
+        Editor.Text = string.Empty;
         _isLoadingDocument = false;
         _isDirty = false;
         UpdateTitle();
@@ -5567,7 +5787,27 @@ refreshEnhancements(document);
         yield return new MarkdownCompletionData("| table |", "Markdown table", "| Column | Value |\n| --- | --- |\n|  |  |", 28);
     }
 
+    private async Task ApplyStartupViewModeAsync()
+    {
+        if (_startupWysiwygMode)
+        {
+            await SetWysiwygModeAsync(true, persist: false);
+            return;
+        }
+
+        _wysiwygMode = false;
+        Editor.Visibility = Visibility.Visible;
+        Wysiwyg.Visibility = Visibility.Collapsed;
+        SetViewMode(_startupViewMode, persist: false);
+        UpdateModeMenuChecks();
+    }
+
     private void SetViewMode(ViewMode mode)
+    {
+        SetViewMode(mode, persist: true);
+    }
+
+    private void SetViewMode(ViewMode mode, bool persist)
     {
         if (_wysiwygMode)
         {
@@ -5604,6 +5844,11 @@ refreshEnhancements(document);
         {
             _ = RenderWysiwygAsync();
         }
+
+        if (persist)
+        {
+            SaveSettings();
+        }
     }
 
     private void UpdateModeMenuChecks()
@@ -5624,6 +5869,11 @@ refreshEnhancements(document);
 
     private async Task SetWysiwygModeAsync(bool enabled)
     {
+        await SetWysiwygModeAsync(enabled, persist: true);
+    }
+
+    private async Task SetWysiwygModeAsync(bool enabled, bool persist)
+    {
         if (enabled && !_wysiwygReady)
         {
             StatusText.Text = "WYSIWYG mode needs Microsoft Edge WebView2 Runtime.";
@@ -5635,6 +5885,10 @@ refreshEnhancements(document);
         if (enabled == _wysiwygMode)
         {
             UpdateModeMenuChecks();
+            if (persist)
+            {
+                SaveSettings();
+            }
             return;
         }
 
@@ -5654,19 +5908,23 @@ refreshEnhancements(document);
 
         if (enabled)
         {
-            SetViewMode(ViewMode.EditorOnly);
+            SetViewMode(ViewMode.EditorOnly, persist);
             await RenderWysiwygAsync();
             Wysiwyg.Focus();
             StatusText.Text = "WYSIWYG mode: the editor is the preview. Focus a block to edit its Markdown.";
         }
         else
         {
-            SetViewMode(_viewModeBeforeWysiwyg);
+            SetViewMode(_viewModeBeforeWysiwyg, persist);
             Editor.TextArea.Focus();
             StatusText.Text = "Source Markdown mode";
         }
 
         UpdateModeMenuChecks();
+        if (persist)
+        {
+            SaveSettings();
+        }
     }
 
     private void SetWysiwygMode(bool enabled)
@@ -6256,6 +6514,29 @@ refreshEnhancements(document);
     private sealed record MathSegment(string Placeholder, string Source, bool Display);
 
     private sealed record ImageSegment(string Placeholder, string Alt, string Target, string? Title);
+
+    private sealed record AppSettings(
+        string? EditorFontFamily,
+        double? EditorFontSize,
+        double? WebViewDefaultZoom,
+        double? PreviewZoom,
+        double? WysiwygZoom,
+        string? ThemeId,
+        string? ThemeMode,
+        ColorProfile? ColorProfile,
+        string? LinkColor,
+        string? WindowBackdrop,
+        bool? WysiwygMode,
+        string? ViewMode,
+        string? ViewModeBeforeWysiwyg,
+        bool? AutomaticCompletion,
+        bool? HideMenuBar,
+        bool? WordWrap,
+        string? WindowState,
+        double? WindowLeft,
+        double? WindowTop,
+        double? WindowWidth,
+        double? WindowHeight);
 
     private sealed record ThemeDefinition(string Id, string DisplayName, ColorProfile Light, ColorProfile Dark, string LightLink, string DarkLink);
 
