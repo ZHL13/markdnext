@@ -22,6 +22,7 @@
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
+    <PublishDir>$(MSBuildProjectDirectory)\dist\</PublishDir>
   </PropertyGroup>
 
   <ItemGroup>

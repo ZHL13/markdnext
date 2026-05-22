@@ -3271,10 +3271,10 @@ window.mdvSetPreview = async function (html, sourceLine) {
 
         if (rows.Length == 0)
         {
-            return "<section class=\"mdv-front-matter\"><div class=\"mdv-front-matter-title\">Front matter</div><pre></pre></section>";
+            return "<section class=\"mdv-front-matter\"><pre></pre></section>";
         }
 
-        return "<section class=\"mdv-front-matter\"><div class=\"mdv-front-matter-title\">Front matter</div><table>"
+        return "<section class=\"mdv-front-matter\"><table>"
             + rows
             + "</table></section>";
     }
@@ -4376,7 +4376,7 @@ function renderFrontMatter(source) {
     }
     return '<tr><td colspan="2">' + escapeHtml(line) + '</td></tr>';
   }).join('');
-  return '<section class="mdv-front-matter"><div class="mdv-front-matter-title">Front matter</div><table>' + rows + '</table></section>';
+  return '<section class="mdv-front-matter"><table>' + rows + '</table></section>';
 }
 
 function renderMarkdownBlock(source) {

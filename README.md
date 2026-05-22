@@ -34,20 +34,22 @@ This repo includes a local .NET SDK under `.dotnet` because the machine only had
 
 ## Publish
 
+Release publishing is configured in `MDV4Windows.csproj` as a self-contained, compressed single-file Windows x64 build.
+
 ```powershell
-.\.dotnet\dotnet.exe publish -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:EnableCompressionInSingleFile=true
+.\.dotnet\dotnet.exe publish -c Release
 ```
 
 The published app is created under:
 
 ```text
-bin\Release\net8.0-windows10.0.19041.0\win-x64\publish\
+dist\MarkDNext.exe
 ```
 
 Run it from Explorer or from a terminal:
 
 ```powershell
-.\bin\Release\net8.0-windows10.0.19041.0\win-x64\publish\MarkDNext.exe .\sample.md
+.\dist\MarkDNext.exe .\sample.md
 ```
 
 The preview requires Microsoft Edge WebView2 Runtime, which is already present on most current Windows 10/11 systems.
