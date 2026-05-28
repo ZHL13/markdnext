@@ -129,6 +129,7 @@ public partial class MainWindow : Window
             InvalidateEditorLineBackgrounds();
         };
         Editor.TextArea.SelectionChanged += (_, _) => InvalidateEditorLineBackgrounds();
+        Editor.TextArea.TextEntering += Editor_TextArea_TextEntering;
         Editor.TextArea.TextEntered += Editor_TextArea_TextEntered;
         Editor.TextArea.PreviewKeyDown += Editor_TextArea_PreviewKeyDown;
         Editor.PreviewMouseWheel += Editor_PreviewMouseWheel;
@@ -1827,6 +1828,20 @@ public partial class MainWindow : Window
         }
     }
 
+    private void Editor_TextArea_TextEntering(object? sender, TextCompositionEventArgs e)
+    {
+        if (_wysiwygMode || Editor.SelectionLength <= 0)
+        {
+            return;
+        }
+
+        if (e.Text is "$" or "`")
+        {
+            WrapEditorSelection(e.Text, e.Text);
+            e.Handled = true;
+        }
+    }
+
     private void Editor_TextArea_TextEntered(object? sender, TextCompositionEventArgs e)
     {
         if (_wysiwygMode)
@@ -1872,6 +1887,51 @@ public partial class MainWindow : Window
         return true;
     }
 
+    private bool TryHandleSourceFormatShortcut(Key key)
+    {
+        switch (key)
+        {
+            case Key.B:
+                WrapEditorSelection("**", "**");
+                return true;
+            case Key.I:
+                WrapEditorSelection("*", "*");
+                return true;
+            case Key.U:
+                WrapEditorSelection("<u>", "</u>");
+                return true;
+            case Key.K:
+                WrapEditorSelection("~~", "~~");
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void WrapEditorSelection(string left, string right)
+    {
+        if (Editor.Document is null)
+        {
+            return;
+        }
+
+        var start = Editor.SelectionStart;
+        var length = Editor.SelectionLength;
+        var selectedText = Editor.SelectedText;
+        Editor.Document.Replace(start, length, left + selectedText + right);
+
+        if (length > 0)
+        {
+            Editor.Select(start + left.Length, length);
+        }
+        else
+        {
+            Editor.Select(start + left.Length, 0);
+        }
+
+        Editor.TextArea.Caret.BringCaretToView();
+    }
+
     private void Editor_TextArea_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (!_wysiwygMode && e.Key == Key.Tab && (Keyboard.Modifiers == ModifierKeys.None || Keyboard.Modifiers == ModifierKeys.Shift)
@@ -1887,7 +1947,25 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!_wysiwygMode && e.Key == Key.Down && Keyboard.Modifiers == ModifierKeys.None && TryMoveLastLineDownToLineEnd())
+        if (!_wysiwygMode
+            && e.Key == Key.Down
+            && (Keyboard.Modifiers == ModifierKeys.None || Keyboard.Modifiers == ModifierKeys.Shift)
+            && TryMoveLastLineDownToLineEnd(Keyboard.Modifiers == ModifierKeys.Shift))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (!_wysiwygMode
+            && e.Key == Key.Up
+            && (Keyboard.Modifiers == ModifierKeys.None || Keyboard.Modifiers == ModifierKeys.Shift)
+            && TryMoveFirstLineUpToLineStart(Keyboard.Modifiers == ModifierKeys.Shift))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (!_wysiwygMode && Keyboard.Modifiers == ModifierKeys.Control && TryHandleSourceFormatShortcut(e.Key))
         {
             e.Handled = true;
             return;
@@ -2262,7 +2340,7 @@ public partial class MainWindow : Window
         return inFence;
     }
 
-    private bool TryMoveLastLineDownToLineEnd()
+    private bool TryMoveLastLineDownToLineEnd(bool extendSelection)
     {
         if (Editor.Document is null)
         {
@@ -2276,8 +2354,67 @@ public partial class MainWindow : Window
         }
 
         var line = Editor.Document.GetLineByNumber(caretLine);
-        Editor.CaretOffset = line.EndOffset;
+        MoveEditorCaretToOffset(line.EndOffset, extendSelection);
         return true;
+    }
+
+    private bool TryMoveFirstLineUpToLineStart(bool extendSelection)
+    {
+        if (Editor.Document is null)
+        {
+            return false;
+        }
+
+        var caretLine = Editor.TextArea.Caret.Line;
+        if (caretLine != 1)
+        {
+            return false;
+        }
+
+        var line = Editor.Document.GetLineByNumber(caretLine);
+        MoveEditorCaretToOffset(line.Offset, extendSelection);
+        return true;
+    }
+
+    private void MoveEditorCaretToOffset(int targetOffset, bool extendSelection)
+    {
+        if (Editor.Document is null)
+        {
+            return;
+        }
+
+        targetOffset = Math.Clamp(targetOffset, 0, Editor.Document.TextLength);
+        if (!extendSelection)
+        {
+            Editor.CaretOffset = targetOffset;
+            return;
+        }
+
+        var anchorOffset = GetEditorSelectionAnchorOffset();
+        var selectionStart = Math.Min(anchorOffset, targetOffset);
+        var selectionEnd = Math.Max(anchorOffset, targetOffset);
+        Editor.TextArea.Caret.Offset = targetOffset;
+        Editor.TextArea.Selection = ICSharpCode.AvalonEdit.Editing.Selection.Create(Editor.TextArea, selectionStart, selectionEnd);
+        Editor.TextArea.Caret.BringCaretToView();
+    }
+
+    private int GetEditorSelectionAnchorOffset()
+    {
+        if (Editor.SelectionLength <= 0)
+        {
+            return Editor.CaretOffset;
+        }
+
+        var selectionStart = Editor.SelectionStart;
+        var selectionEnd = selectionStart + Editor.SelectionLength;
+        var caretOffset = Editor.CaretOffset;
+
+        if (caretOffset == selectionStart)
+        {
+            return selectionEnd;
+        }
+
+        return selectionStart;
     }
 
     private void Window_KeyDown(object sender, KeyEventArgs e)
@@ -4487,6 +4624,8 @@ function renderInline(source) {
   text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, label, target) {
     return '<a href="' + escapeAttribute(target.trim()) + '">' + label + '</a>';
   });
+  text = text.replace(/&lt;u&gt;([\s\S]+?)&lt;\/u&gt;/g, '<u>$1</u>');
+  text = text.replace(/~~([\s\S]+?)~~/g, '<del>$1</del>');
   text = text.replace(/(\*\*|__)(.+?)\1/g, '<strong>$2</strong>');
   text = text.replace(/(\*|_)([^*_]+?)\1/g, '<em>$2</em>');
   stash.forEach(function (html, index) {
@@ -5161,12 +5300,18 @@ function beginEdit(index, placement) {
       textarea.value = textarea.value.substring(0, start) + '    ' + textarea.value.substring(end);
       textarea.selectionStart = textarea.selectionEnd = start + 4;
       textarea.dispatchEvent(new Event('input'));
-    } else if (event.ctrlKey && event.key.toLowerCase() === 'b') {
+    } else if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'b') {
       event.preventDefault();
       insertAroundSelection(textarea, '**', '**');
-    } else if (event.ctrlKey && event.key.toLowerCase() === 'i') {
+    } else if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'i') {
       event.preventDefault();
       insertAroundSelection(textarea, '*', '*');
+    } else if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'u') {
+      event.preventDefault();
+      insertAroundSelection(textarea, '<u>', '</u>');
+    } else if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      insertAroundSelection(textarea, '~~', '~~');
     } else if (pairKey(textarea, event)) {
       return;
     } else if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey) {
