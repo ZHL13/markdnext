@@ -1,8 +1,8 @@
-# MarkDNext
+﻿# MarkDNext
 
 MarkDNext is a native Windows Markdown editor and viewer. It was vibe-coded with help from Codex, and is inspired by MDV, MarkText, and ghostwriter.
 
-![MarkDNext screenshot](screenshot.png)
+![MarkDNext screenshot](docs/screenshot.png)
 
 ## Features
 
@@ -14,17 +14,29 @@ MarkDNext is a native Windows Markdown editor and viewer. It was vibe-coded with
 - WYSIWYG mode keeps a browser-side block state in one persistent WebView document, while syncing the same Markdown text used by source mode.
 - Code blocks in WYSIWYG mode use a language field plus code body editor, with Markdown fences preserved in the saved source.
 - WYSIWYG mode includes block commands: type `/` in a focused block to insert headings, lists, code blocks, math blocks, and tables.
+- Blurred WYSIWYG blocks can be reordered by dragging their hover handles.
 - Live WebView2 preview with off-screen KaTeX/code rendering before content is swapped into view.
 - GitHub-style Markdown rendering through Markdig advanced extensions.
 - Source editor highlighting and completion through AvalonEdit.
 - Automatic completion is optional from `Edit -> Automatic Completion`; `Ctrl+H` toggles it in source mode.
+- View shortcuts: `Ctrl+W` WYSIWYG, `Ctrl+E` editor only, `Ctrl+R` preview only, and `Ctrl+T` split view. `Ctrl+Q` closes the window.
 - Offline code highlighting through bundled highlight.js assets.
 - KaTeX rendering for inline `$\alpha$` and display `$$\alpha$$` formulas.
 - Auto reloads the file when it is changed on disk and the editor has no unsaved changes.
 - Find in editor or preview.
 - Print from the File menu, or use `File -> Export` to export HTML or PDF. HTML export copies local images beside the document under an `assets` folder.
 - Relative images and links resolve from the Markdown file folder.
-- Theme menu with Mica and Acrylic window backdrop options when supported by Windows, with a flat fallback.
+- Theme chooser with built-in themes plus import/export for theme profiles, and Mica/Acrylic window backdrop options when supported by Windows.
+
+## Repository Layout
+
+- `src/` contains the WPF application source and XAML views.
+- `resources/app/` contains the app icon and window logo.
+- `resources/web/` contains embedded offline WebView assets such as KaTeX and highlight.js.
+- `resources/themes/` contains bundled color themes.
+- `examples/` contains sample Markdown and theme profile files.
+- `docs/` contains repository images and documentation media.
+- `scripts/` contains local build and packaging helpers.
 
 ## Build
 
@@ -39,21 +51,21 @@ dotnet build -c Release
 Release publishing is configured in `MarkDNext.csproj` as a self-contained, compressed single-file Windows x64 build.
 
 ```powershell
-dotnet publish -c Release
+.\scripts\package-release.ps1
 ```
 
-The standalone executable is created at:
+The release helper publishes the app and leaves a single standalone executable at:
 
 ```text
-dist\MarkDNext.exe
+dist\MarkDNext-<version>-win-x64.exe
 ```
 
-License and third-party notice files are copied to `dist` alongside the executable.
+Direct `dotnet publish -c Release` still works for local testing, while the release helper cleans `dist` down to the versioned executable used for GitHub releases.
 
 Run it from Explorer or from a terminal:
 
 ```powershell
-.\dist\MarkDNext.exe .\sample.md
+.\dist\MarkDNext-<version>-win-x64.exe .\examples\sample.md
 ```
 
 The preview requires Microsoft Edge WebView2 Runtime, which is already present on most current Windows 10/11 systems.

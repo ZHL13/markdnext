@@ -1,4 +1,4 @@
-using ICSharpCode.AvalonEdit.CodeCompletion;
+﻿using ICSharpCode.AvalonEdit.CodeCompletion;
 using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Rendering;
 using Markdig;
@@ -37,7 +37,7 @@ public partial class MainWindow : Window
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Lazy<IReadOnlyDictionary<string, string>> EmbeddedAssetNames = new(BuildEmbeddedAssetMap);
 
-    private readonly IReadOnlyList<ThemeDefinition> _availableThemes = LoadBuiltInThemes();
+    private readonly IReadOnlyList<ThemeDefinition> _builtInThemes = LoadBuiltInThemes();
     private readonly MarkdownColorizer _markdownColorizer = new();
     private readonly EditorLineSpacingElementGenerator _editorLineSpacingGenerator = new();
     private readonly MarkdownPipeline _markdownPipeline;
@@ -260,6 +260,11 @@ public partial class MainWindow : Window
     private static string GetSettingsPath()
     {
         return Path.Combine(GetAppDataFolder(), "settings.json");
+    }
+
+    private static string GetUserThemesFolder()
+    {
+        return Path.Combine(GetAppDataFolder(), "themes");
     }
 
     private void LoadSettings()
@@ -624,6 +629,12 @@ public partial class MainWindow : Window
         SetViewMode(ViewMode.PreviewOnly);
     }
 
+    private async void EditorMode_Click(object sender, RoutedEventArgs e)
+    {
+        await SetWysiwygModeAsync(false);
+        SetViewMode(ViewMode.EditorOnly);
+    }
+
     private async void StatusEditorMode_Click(object sender, RoutedEventArgs e)
     {
         await SetWysiwygModeAsync(false);
@@ -963,76 +974,267 @@ public partial class MainWindow : Window
         SaveSettings();
     }
 
-    private void LoadColorProfile_Click(object sender, RoutedEventArgs e)
+    private void ImportTheme_Click(object sender, RoutedEventArgs e)
     {
+        if (!TryImportThemeDefinition(this, out var theme))
+        {
+            return;
+        }
+
+        _currentThemeId = theme.Id;
+        _colorProfile = GetThemeProfile(theme, _themeMode).Normalized();
+        _linkColor = GetThemeLinkColor(theme, _themeMode);
+        ApplyAppearance();
+        RefreshRenderedShells();
+        StatusText.Text = $"Imported theme {theme.DisplayName}";
+        SaveSettings();
+    }
+
+    private void ExportTheme_Click(object sender, RoutedEventArgs e)
+    {
+        _ = TryExportThemeProfile(this, CurrentThemeDefinition(), _themeMode);
+    }
+
+    private void ResetTheme_Click(object sender, RoutedEventArgs e)
+    {
+        _currentThemeId = DefaultThemeId;
+        _themeMode = ThemeMode.Normal;
+        ApplySelectedTheme();
+        StatusText.Text = "Theme reset.";
+        SaveSettings();
+    }
+
+    private bool TryImportThemeDefinition(Window owner, out ThemeDefinition theme)
+    {
+        theme = CreateCustomThemeDefinition("Custom Theme", _colorProfile, _linkColor);
         var dialog = new OpenFileDialog
         {
-            Filter = "MarkDNext color profile (*.json)|*.json|All files (*.*)|*.*",
+            Filter = "MarkDNext theme (*.json)|*.json|All files (*.*)|*.*",
             Multiselect = false
         };
 
-        if (dialog.ShowDialog(this) != true)
+        if (dialog.ShowDialog(owner) != true)
         {
-            return;
+            return false;
         }
 
         try
         {
             var json = File.ReadAllText(dialog.FileName, Encoding.UTF8);
-            var profile = JsonSerializer.Deserialize<ColorProfile>(json, JsonOptions);
-            if (profile is null)
-            {
-                throw new InvalidDataException("The selected file is not a color profile.");
-            }
-
-            _colorProfile = profile.Normalized();
-            _currentThemeId = string.Empty;
-            _linkColor = LinkColorFromProfile(_colorProfile, _themeMode);
-            ApplyAppearance();
-            RefreshRenderedShells();
-            StatusText.Text = $"Loaded color profile {Path.GetFileName(dialog.FileName)}";
-            SaveSettings();
+            theme = PersistUserTheme(ReadThemeDefinition(json, dialog.FileName, _themeMode));
+            return true;
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Load color profile failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(owner, ex.Message, "Import theme failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
         }
     }
 
-    private void SaveColorProfile_Click(object sender, RoutedEventArgs e)
+    private bool TryExportThemeProfile(Window owner, ThemeDefinition theme, ThemeMode mode)
     {
         var dialog = new SaveFileDialog
         {
-            Filter = "MarkDNext color profile (*.json)|*.json|All files (*.*)|*.*",
-            FileName = "MarkDNext.colors.json"
+            Filter = "MarkDNext theme (*.json)|*.json|All files (*.*)|*.*",
+            FileName = ThemeFileName(theme.DisplayName)
         };
 
-        if (dialog.ShowDialog(this) != true)
+        if (dialog.ShowDialog(owner) != true)
         {
-            return;
+            return false;
         }
 
         try
         {
-            var json = JsonSerializer.Serialize(_colorProfile, new JsonSerializerOptions(JsonOptions) { WriteIndented = true });
-            File.WriteAllText(dialog.FileName, json, Utf8NoBom);
-            StatusText.Text = $"Saved color profile {Path.GetFileName(dialog.FileName)}";
+            WriteThemeFile(dialog.FileName, theme);
+            StatusText.Text = $"Exported theme {Path.GetFileName(dialog.FileName)}";
+            return true;
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Save color profile failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(owner, ex.Message, "Export theme failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
         }
     }
 
-    private void ResetColorProfile_Click(object sender, RoutedEventArgs e)
+    private ThemeDefinition CurrentThemeDefinition()
     {
-        _currentThemeId = DefaultThemeId;
-        _themeMode = ThemeMode.Normal;
-        ApplySelectedTheme();
-        StatusText.Text = "Color profile reset.";
-        SaveSettings();
+        if (string.IsNullOrWhiteSpace(_currentThemeId))
+        {
+            var darkProfile = CreateDarkProfileFromLight(_colorProfile);
+            return new ThemeDefinition(
+                string.Empty,
+                "Custom Theme",
+                _colorProfile.Normalized(),
+                darkProfile,
+                LinkColorFromProfile(_colorProfile, ThemeMode.Normal),
+                LinkColorFromProfile(darkProfile, ThemeMode.Dark));
+        }
+
+        return FindTheme(_currentThemeId);
     }
 
+    private static ThemeDefinition CreateCustomThemeDefinition(string displayName, ColorProfile profile, string linkColor)
+    {
+        var light = profile.Normalized();
+        var dark = CreateDarkProfileFromLight(light);
+        return new ThemeDefinition(string.Empty, displayName, light, dark, linkColor, LinkColorFromProfile(dark, ThemeMode.Dark));
+    }
+
+    private ThemeDefinition PersistUserTheme(ThemeDefinition theme)
+    {
+        var folder = GetUserThemesFolder();
+        Directory.CreateDirectory(folder);
+        var path = Path.Combine(folder, ThemeFileName(theme.DisplayName));
+        var savedTheme = theme with { Id = UserThemeIdFromPath(path) };
+        WriteThemeFile(path, savedTheme);
+        return savedTheme;
+    }
+
+    private static void WriteThemeFile(string path, ThemeDefinition theme)
+    {
+        var file = new ThemeProfileFile(
+            theme.DisplayName,
+            theme.Light.Normalized(),
+            theme.Dark.Normalized(),
+            theme.LightLink,
+            theme.DarkLink);
+        var json = JsonSerializer.Serialize(file, new JsonSerializerOptions(JsonOptions) { WriteIndented = true });
+        File.WriteAllText(path, json, Utf8NoBom);
+    }
+
+    private static ThemeDefinition ReadThemeDefinition(string json, string fileName, ThemeMode mode)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        var displayName = ThemeNameFromJson(root) ?? ThemeDisplayNameFromFile(fileName);
+
+        if (root.TryGetProperty("light", out var lightElement) && root.TryGetProperty("dark", out var darkElement))
+        {
+            if (LooksLikeColorProfile(lightElement) || LooksLikeColorProfile(darkElement))
+            {
+                var themeFile = JsonSerializer.Deserialize<ThemeProfileFile>(json, JsonOptions)
+                    ?? throw new InvalidDataException("The selected file is not a valid theme.");
+                var profileLight = themeFile.Light?.Normalized()
+                    ?? throw new InvalidDataException("The selected file is missing a light theme profile.");
+                var profileDark = themeFile.Dark?.Normalized()
+                    ?? throw new InvalidDataException("The selected file is missing a dark theme profile.");
+                return new ThemeDefinition(
+                    string.Empty,
+                    string.IsNullOrWhiteSpace(themeFile.Name) ? displayName : themeFile.Name.Trim(),
+                    profileLight,
+                    profileDark,
+                    string.IsNullOrWhiteSpace(themeFile.LightLink) ? LinkColorFromProfile(profileLight, ThemeMode.Normal) : themeFile.LightLink,
+                    string.IsNullOrWhiteSpace(themeFile.DarkLink) ? LinkColorFromProfile(profileDark, ThemeMode.Dark) : themeFile.DarkLink);
+            }
+
+            var paletteFile = JsonSerializer.Deserialize<ThemeFile>(json, JsonOptions)
+                ?? throw new InvalidDataException("The selected file is not a valid theme.");
+            var light = ColorProfileFromPalette(paletteFile.Light, false).Normalized();
+            var dark = ColorProfileFromPalette(paletteFile.Dark, true).Normalized();
+            return new ThemeDefinition(
+                string.Empty,
+                displayName,
+                light,
+                dark,
+                LinkColorFromPalette(paletteFile.Light, false),
+                LinkColorFromPalette(paletteFile.Dark, true));
+        }
+
+        if (LooksLikeColorProfile(root))
+        {
+            var light = JsonSerializer.Deserialize<ColorProfile>(json, JsonOptions)?.Normalized()
+                ?? throw new InvalidDataException("The selected file is not a valid theme profile.");
+            var dark = CreateDarkProfileFromLight(light);
+            return new ThemeDefinition(
+                string.Empty,
+                displayName,
+                light,
+                dark,
+                LinkColorFromProfile(light, ThemeMode.Normal),
+                LinkColorFromProfile(dark, ThemeMode.Dark));
+        }
+
+        throw new InvalidDataException("The selected file is not a supported MarkDNext theme.");
+    }
+
+    private static bool LooksLikeColorProfile(JsonElement element)
+    {
+        return element.ValueKind == JsonValueKind.Object
+            && (element.TryGetProperty("page", out _)
+                || element.TryGetProperty("editorBackground", out _)
+                || element.TryGetProperty("quoteBackground", out _));
+    }
+
+    private static string? ThemeNameFromJson(JsonElement root)
+    {
+        if (root.ValueKind == JsonValueKind.Object
+            && root.TryGetProperty("name", out var name)
+            && name.ValueKind == JsonValueKind.String)
+        {
+            return name.GetString();
+        }
+
+        return null;
+    }
+
+    private static ColorProfile CreateDarkProfileFromLight(ColorProfile lightProfile)
+    {
+        var light = lightProfile.Normalized();
+        var page = InvertThemeColor(light.Page);
+        return light with
+        {
+            Page = page,
+            Window = page,
+            EditorBackground = page,
+            Surface = MixColors(page, light.Text, 0.06),
+            Chrome = MixColors(page, light.Text, 0.10),
+            Code = MixColors(page, light.Accent, 0.16),
+            QuoteBackground = MixColors(page, light.Accent, 0.22)
+        };
+    }
+
+    private static string InvertThemeColor(string value)
+    {
+        var color = ParseThemeColor(value, Colors.White);
+        return ColorToHex(Color.FromRgb((byte)(255 - color.R), (byte)(255 - color.G), (byte)(255 - color.B)));
+    }
+
+    private static string ThemeDisplayNameFromFile(string fileName)
+    {
+        var name = Path.GetFileNameWithoutExtension(fileName);
+        if (name.EndsWith(".theme", StringComparison.OrdinalIgnoreCase))
+        {
+            name = Path.GetFileNameWithoutExtension(name);
+        }
+
+        name = Regex.Replace(name, "[-_]+", " ").Trim();
+        return string.IsNullOrWhiteSpace(name)
+            ? "Imported Theme"
+            : CultureInfo.CurrentCulture.TextInfo.ToTitleCase(name);
+    }
+
+    private static string ThemeFileName(string displayName)
+    {
+        var cleanName = Regex.Replace(displayName, @"[^A-Za-z0-9]+", "-").Trim('-');
+        if (string.IsNullOrWhiteSpace(cleanName))
+        {
+            cleanName = "MarkDNext";
+        }
+
+        return $"{cleanName}.theme.json";
+    }
+
+    private static string UserThemeIdFromPath(string path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path);
+        if (name.EndsWith(".theme", StringComparison.OrdinalIgnoreCase))
+        {
+            name = Path.GetFileNameWithoutExtension(name);
+        }
+
+        return "user:" + name.ToLowerInvariant();
+    }
     private void ChooseTheme_Click(object sender, RoutedEventArgs e)
     {
         var originalThemeId = _currentThemeId;
@@ -1041,6 +1243,11 @@ public partial class MainWindow : Window
         var originalLinkColor = _linkColor;
         var suppressThemeSelection = false;
         var themePreviewChanged = false;
+        var dialogThemes = GetAvailableThemes().ToList();
+        if (string.IsNullOrWhiteSpace(_currentThemeId))
+        {
+            dialogThemes.Insert(0, CreateCustomThemeDefinition("Custom Theme", _colorProfile, _linkColor));
+        }
 
         var list = new ListBox
         {
@@ -1064,6 +1271,12 @@ public partial class MainWindow : Window
         modePanel.Children.Add(normalButton);
         modePanel.Children.Add(darkButton);
 
+        var importButton = new Button { Content = "Import...", MinWidth = 82, Margin = new Thickness(0, 0, 8, 0) };
+        var exportButton = new Button { Content = "Export Selected...", MinWidth = 122 };
+        var themeTools = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, -4, 0, 12) };
+        themeTools.Children.Add(importButton);
+        themeTools.Children.Add(exportButton);
+
         var okButton = new Button { Content = "OK", MinWidth = 78, IsDefault = true, Margin = new Thickness(0, 0, 8, 0) };
         var cancelButton = new Button { Content = "Cancel", MinWidth = 78, IsCancel = true };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
@@ -1073,6 +1286,7 @@ public partial class MainWindow : Window
         var panel = new StackPanel { Margin = new Thickness(16) };
         panel.Children.Add(new TextBlock { Text = "Theme" });
         panel.Children.Add(list);
+        panel.Children.Add(themeTools);
         panel.Children.Add(new TextBlock { Text = "Mode", Margin = new Thickness(0, 0, 0, 6) });
         panel.Children.Add(modePanel);
         panel.Children.Add(buttons);
@@ -1109,12 +1323,12 @@ public partial class MainWindow : Window
             list.Resources[SystemColors.HighlightTextBrushKey] = text;
             normalButton.Foreground = text;
             darkButton.Foreground = text;
-            okButton.Foreground = text;
-            cancelButton.Foreground = text;
-            okButton.Background = BrushFromHex(_colorProfile.Chrome);
-            cancelButton.Background = BrushFromHex(_colorProfile.Chrome);
-            okButton.BorderBrush = line;
-            cancelButton.BorderBrush = line;
+            foreach (var button in new[] { importButton, exportButton, okButton, cancelButton })
+            {
+                button.Foreground = text;
+                button.Background = BrushFromHex(_colorProfile.Chrome);
+                button.BorderBrush = line;
+            }
 
             foreach (var child in panel.Children.OfType<TextBlock>())
             {
@@ -1136,7 +1350,7 @@ public partial class MainWindow : Window
             {
                 list.Items.Clear();
                 ListBoxItem? selectedItem = null;
-                foreach (var theme in _availableThemes)
+                foreach (var theme in dialogThemes)
                 {
                     var item = CreateThemeListItem(theme, _themeMode);
                     list.Items.Add(item);
@@ -1199,6 +1413,42 @@ public partial class MainWindow : Window
             ApplyThemeDialogAppearance();
         }
 
+        ThemeDefinition? SelectedTheme()
+        {
+            return list.SelectedItem is ListBoxItem { Tag: ThemeDefinition theme } ? theme : null;
+        }
+
+        importButton.Click += (_, _) =>
+        {
+            if (!TryImportThemeDefinition(dialog, out var importedTheme))
+            {
+                return;
+            }
+
+            dialogThemes.RemoveAll(theme => string.IsNullOrWhiteSpace(theme.Id) || string.Equals(theme.Id, importedTheme.Id, StringComparison.OrdinalIgnoreCase));
+            dialogThemes.Insert(0, importedTheme);
+            _currentThemeId = importedTheme.Id;
+            _colorProfile = GetThemeProfile(importedTheme, _themeMode).Normalized();
+            _linkColor = GetThemeLinkColor(importedTheme, _themeMode);
+            ApplyAppearance();
+            RefreshRenderedShells();
+            themePreviewChanged = true;
+            PopulateThemeList(importedTheme.Id);
+            ApplyThemeDialogAppearance();
+            StatusText.Text = $"Imported theme {importedTheme.DisplayName}";
+        };
+
+        exportButton.Click += (_, _) =>
+        {
+            var selectedTheme = SelectedTheme();
+            if (selectedTheme is null)
+            {
+                return;
+            }
+
+            _ = TryExportThemeProfile(dialog, selectedTheme, _themeMode);
+        };
+
         list.SelectionChanged += (_, _) => ApplySelection();
         normalButton.Checked += (_, _) =>
         {
@@ -1219,7 +1469,7 @@ public partial class MainWindow : Window
 
         if (dialog.ShowDialog() == true)
         {
-            StatusText.Text = $"Theme: {FindTheme(_currentThemeId).DisplayName} ({ThemeModeLabel(_themeMode)})";
+            StatusText.Text = $"Theme: {(SelectedTheme() ?? CurrentThemeDefinition()).DisplayName} ({ThemeModeLabel(_themeMode)})";
             SaveSettings();
             return;
         }
@@ -1308,10 +1558,40 @@ public partial class MainWindow : Window
         RefreshRenderedShells();
     }
 
+    private IReadOnlyList<ThemeDefinition> GetAvailableThemes()
+    {
+        return _builtInThemes.Concat(LoadUserThemes()).ToList();
+    }
+
+    private static IReadOnlyList<ThemeDefinition> LoadUserThemes()
+    {
+        var folder = GetUserThemesFolder();
+        if (!Directory.Exists(folder))
+        {
+            return Array.Empty<ThemeDefinition>();
+        }
+
+        var themes = new List<ThemeDefinition>();
+        foreach (var path in Directory.GetFiles(folder, "*.json").OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var json = File.ReadAllText(path, Encoding.UTF8);
+                themes.Add(ReadThemeDefinition(json, path, ThemeMode.Normal) with { Id = UserThemeIdFromPath(path) });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine(ex);
+            }
+        }
+
+        return themes;
+    }
+
     private ThemeDefinition FindTheme(string id)
     {
-        return _availableThemes.FirstOrDefault(theme => string.Equals(theme.Id, id, StringComparison.OrdinalIgnoreCase))
-            ?? _availableThemes[0];
+        return GetAvailableThemes().FirstOrDefault(theme => string.Equals(theme.Id, id, StringComparison.OrdinalIgnoreCase))
+            ?? _builtInThemes[0];
     }
 
     private static ColorProfile GetThemeProfile(ThemeDefinition theme, ThemeMode mode)
@@ -1981,9 +2261,14 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.W)
+        if (TryHandleCloseShortcut(e.Key))
         {
-            Close();
+            e.Handled = true;
+            return;
+        }
+
+        if (TryHandleViewModeShortcut(e.Key))
+        {
             e.Handled = true;
             return;
         }
@@ -2417,6 +2702,48 @@ public partial class MainWindow : Window
         return selectionStart;
     }
 
+    private bool TryHandleCloseShortcut(Key key)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.Control || key != Key.Q)
+        {
+            return false;
+        }
+
+        Close();
+        return true;
+    }
+
+    private bool TryHandleViewModeShortcut(Key key)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.Control)
+        {
+            return false;
+        }
+
+        switch (key)
+        {
+            case Key.W:
+                _ = SetWysiwygModeAsync(true);
+                return true;
+            case Key.E:
+                _ = SetSourceViewModeAsync(ViewMode.EditorOnly);
+                return true;
+            case Key.R:
+                _ = SetSourceViewModeAsync(ViewMode.PreviewOnly);
+                return true;
+            case Key.T:
+                _ = SetSourceViewModeAsync(ViewMode.Both);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private async Task SetSourceViewModeAsync(ViewMode mode)
+    {
+        await SetWysiwygModeAsync(false);
+        SetViewMode(mode);
+    }
     private void Window_KeyDown(object sender, KeyEventArgs e)
     {
         if (_menuBarHidden && (e.Key == Key.F10 || e.SystemKey == Key.F10 || e.SystemKey == Key.LeftAlt || e.SystemKey == Key.RightAlt))
@@ -2449,9 +2776,12 @@ public partial class MainWindow : Window
             ShowFindBar();
             e.Handled = true;
         }
-        else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.W)
+        else if (TryHandleCloseShortcut(e.Key))
         {
-            Close();
+            e.Handled = true;
+        }
+        else if (TryHandleViewModeShortcut(e.Key))
+        {
             e.Handled = true;
         }
         else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.H)
@@ -3307,7 +3637,24 @@ window.mdvSetWebViewZoomFactor = function (zoom) {
 
 document.addEventListener('keydown', function (event) {
   if ((!event.ctrlKey && !event.metaKey) || event.altKey) return;
-  const key = event.key || '';
+  const key = (event.key || '').toLowerCase();
+  if (key === 'q') {
+    event.preventDefault();
+    event.stopPropagation();
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage({ type: 'closeWindow' });
+    }
+    return;
+  }
+  const viewMessages = { w: 'viewWysiwyg', e: 'viewEditor', r: 'viewPreview', t: 'viewSplit' };
+  if (viewMessages[key]) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage({ type: viewMessages[key] });
+    }
+    return;
+  }
   if (key === '0') {
     event.preventDefault();
     event.stopPropagation();
@@ -4090,6 +4437,7 @@ html, body {
   padding: 28px 36px 60px;
 }
 .md-block {
+  position: relative;
   border-radius: 6px;
   margin: 0 0 12px;
   padding: 3px 6px;
@@ -4101,6 +4449,73 @@ html, body {
 .md-block.editing {
   background: rgba(23, 105, 170, .09);
   box-shadow: inset 0 0 0 1px rgba(23, 105, 170, .22);
+}
+.md-block.dragging {
+  opacity: .45;
+}
+.md-block.drag-hover:not(.editing) {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.block-drag-handle {
+  position: absolute;
+  z-index: 3;
+  top: 5px;
+  bottom: 5px;
+  width: 22px;
+  min-height: 28px;
+  border: 1px solid color-mix(in srgb, var(--accent) 48%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  cursor: grab;
+  opacity: 0;
+  pointer-events: none;
+  touch-action: none;
+  transition: opacity .12s ease, background-color .12s ease, border-color .12s ease;
+}
+.block-drag-handle.left {
+  left: -30px;
+}
+.block-drag-handle.right {
+  right: -30px;
+}
+.block-drag-handle::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: min(30px, calc(100% - 12px));
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .68), 0 1px 4px rgba(15, 23, 42, .18);
+}
+.md-block.drag-hover:not(.editing) .block-drag-handle {
+  opacity: .88;
+  pointer-events: auto;
+}
+.block-drag-handle:hover,
+.block-drag-handle:active {
+  opacity: 1;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  pointer-events: auto;
+}
+.block-drag-handle:active {
+  cursor: grabbing;
+}
+html.block-reordering,
+html.block-reordering * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+.block-drop-line {
+  height: 0;
+  margin: -2px 6px 10px;
+  border-top: 3px solid var(--accent);
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .72), 0 2px 10px rgba(23, 105, 170, .28);
+  pointer-events: none;
 }
 .md-block.code {
   padding-left: 0;
@@ -4424,6 +4839,9 @@ let inputTimer = 0;
 let slashMenu = null;
 let slashIndex = 0;
 let wysiwygRenderToken = 0;
+let blockDragState = null;
+let blockDropLine = null;
+let blockDragHoverIndex = -1;
 
 window.mdvSetWebViewZoomFactor = function (zoom) {
   const value = Math.max(0.25, Math.min(5, Number(zoom) || 1));
@@ -4490,6 +4908,19 @@ document.addEventListener('keydown', function (event) {
   const key = (event.key || '').toLowerCase();
   const command = event.ctrlKey || event.metaKey;
   if (!command || event.altKey) return;
+  if (key === 'q') {
+    event.preventDefault();
+    event.stopPropagation();
+    post('closeWindow');
+    return;
+  }
+  const viewMessages = { w: 'viewWysiwyg', e: 'viewEditor', r: 'viewPreview', t: 'viewSplit' };
+  if (viewMessages[key]) {
+    event.preventDefault();
+    event.stopPropagation();
+    post(viewMessages[key]);
+    return;
+  }
   if (key === '0') {
     event.preventDefault();
     event.stopPropagation();
@@ -4721,6 +5152,7 @@ function renderBlockInto(section, block, enhance) {
   decorateCodeBlocks(rendered);
   wireTaskCheckboxes(rendered, block, section);
   section.replaceChildren(rendered);
+  appendBlockDragHandles(section, block);
   if (enhance) refreshEnhancements(section);
 }
 
@@ -4778,11 +5210,290 @@ function toggleTaskSource(block, taskIndex, checked) {
   }
 }
 
+function reorderableBlockCount() {
+  let count = blocks.length;
+  while (count > 0 && !(blocks[count - 1].source || '').trim()) {
+    count--;
+  }
+  return count;
+}
+
+function isBlockDraggable(index) {
+  return index >= 0 && index < reorderableBlockCount();
+}
+
+function ensureBlockDropLine() {
+  if (!blockDropLine) {
+    blockDropLine = document.createElement('div');
+    blockDropLine.className = 'block-drop-line';
+  }
+  return blockDropLine;
+}
+
+function hideBlockDropLine() {
+  if (blockDropLine && blockDropLine.parentElement) {
+    blockDropLine.remove();
+  }
+}
+
+function appendBlockDragHandles(section, block) {
+  const index = blocks.indexOf(block);
+  if (activeIndex === index || !isBlockDraggable(index)) return;
+  section.appendChild(createBlockDragHandle(section, block, 'left'));
+  section.appendChild(createBlockDragHandle(section, block, 'right'));
+}
+
+function createBlockDragHandle(section, block, position) {
+  const handle = document.createElement('div');
+  handle.className = 'block-drag-handle ' + position;
+  handle.draggable = false;
+  handle.tabIndex = -1;
+  handle.setAttribute('aria-hidden', 'true');
+  handle.addEventListener('click', function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  handle.addEventListener('mousedown', function (event) {
+    if (blockDragState) return;
+    if (event.button !== undefined && event.button !== 0) return;
+    const index = blocks.indexOf(block);
+    if (activeIndex >= 0 || !isBlockDraggable(index)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    startBlockPointerDrag(handle, section, index, event);
+  });
+  handle.addEventListener('pointerdown', function (event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    const index = blocks.indexOf(block);
+    if (activeIndex >= 0 || !isBlockDraggable(index)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    startBlockPointerDrag(handle, section, index, event);
+  });
+  return handle;
+}
+
+function startBlockPointerDrag(handle, section, index, event) {
+  if (blockDragState) return;
+  const root = section.parentElement || document.getElementById('editor');
+  if (!root) return;
+  const pointerId = event.pointerId !== undefined ? event.pointerId : 'mouse';
+  blockDragState = {
+    sourceIndex: index,
+    targetIndex: index,
+    pointerId: pointerId,
+    handle: handle,
+    root: root
+  };
+  section.classList.add('dragging');
+  document.documentElement.classList.add('block-reordering');
+  setBlockDragHover(root, index);
+  showBlockDropLine(root, index);
+
+  handle.addEventListener('pointermove', handleBlockPointerMove);
+  handle.addEventListener('pointerup', finishBlockPointerDrag);
+  handle.addEventListener('pointercancel', cancelBlockPointerDrag);
+  document.addEventListener('pointermove', handleBlockPointerMove, true);
+  document.addEventListener('pointerup', finishBlockPointerDrag, true);
+  document.addEventListener('pointercancel', cancelBlockPointerDrag, true);
+  document.addEventListener('mousemove', handleBlockPointerMove, true);
+  document.addEventListener('mouseup', finishBlockPointerDrag, true);
+  try {
+    if (event.pointerId !== undefined) handle.setPointerCapture(event.pointerId);
+  } catch (_) {
+  }
+}
+
+function handleBlockPointerMove(event) {
+  if (!blockDragState) return;
+  if (blockDragState.pointerId !== 'mouse' && blockDragState.pointerId !== event.pointerId) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const root = blockDragState.root || document.getElementById('editor');
+  if (!root) return;
+  const targetIndex = getBlockDropIndex(root, event);
+  blockDragState.targetIndex = targetIndex;
+  showBlockDropLine(root, targetIndex);
+}
+
+function finishBlockPointerDrag(event) {
+  if (!blockDragState) return;
+  if (blockDragState.pointerId !== 'mouse' && blockDragState.pointerId !== event.pointerId) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const sourceIndex = blockDragState.sourceIndex;
+  const targetIndex = blockDragState.targetIndex;
+  cleanupBlockDrag();
+  reorderBlock(sourceIndex, targetIndex);
+}
+
+function cancelBlockPointerDrag(event) {
+  if (!blockDragState) return;
+  if (blockDragState.pointerId !== 'mouse' && blockDragState.pointerId !== event.pointerId) return;
+  event.preventDefault();
+  event.stopPropagation();
+  cleanupBlockDrag();
+}
+
+function clearBlockDragHover(root) {
+  const scope = root || document;
+  scope.querySelectorAll('.md-block.drag-hover').forEach(function (section) {
+    section.classList.remove('drag-hover');
+  });
+  blockDragHoverIndex = -1;
+}
+
+function setBlockDragHover(root, index) {
+  if (!root || index === blockDragHoverIndex) return;
+  root.querySelectorAll('.md-block.drag-hover').forEach(function (section) {
+    section.classList.remove('drag-hover');
+  });
+  blockDragHoverIndex = index;
+  if (!isBlockDraggable(index) || activeIndex >= 0) return;
+  const section = root.querySelector('.md-block[data-index="' + index + '"]');
+  if (section) section.classList.add('drag-hover');
+}
+
+function getBlockHoverIndex(root, clientY) {
+  const sections = Array.from(root.querySelectorAll('.md-block'));
+  for (const section of sections) {
+    const index = Number(section.dataset.index);
+    if (!Number.isFinite(index) || !isBlockDraggable(index)) continue;
+    const rect = section.getBoundingClientRect();
+    if (clientY >= rect.top && clientY <= rect.bottom) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function updateBlockDragHover(root, event) {
+  if (blockDragState) return;
+  setBlockDragHover(root, getBlockHoverIndex(root, event.clientY));
+}
+
+function ensureBlockDragHandlers(root) {
+  if (root.dataset.blockDragHandlers === 'true') return;
+  root.dataset.blockDragHandlers = 'true';
+  root.addEventListener('mousemove', function (event) {
+    updateBlockDragHover(root, event);
+  });
+  root.addEventListener('mouseover', function (event) {
+    updateBlockDragHover(root, event);
+  });
+  root.addEventListener('mouseleave', function () {
+    if (!blockDragState) clearBlockDragHover(root);
+  });
+  root.addEventListener('dragenter', function (event) {
+    if (!blockDragState) return;
+    event.preventDefault();
+  });
+  root.addEventListener('dragover', handleBlockDragOver);
+  root.addEventListener('drop', handleBlockDrop);
+  root.addEventListener('dragleave', function (event) {
+    if (!blockDragState || root.contains(event.relatedTarget)) return;
+    hideBlockDropLine();
+  });
+}
+
+function getBlockDropIndex(root, event) {
+  const maxIndex = reorderableBlockCount();
+  const sections = Array.from(root.querySelectorAll('.md-block'));
+  for (const section of sections) {
+    const index = Number(section.dataset.index);
+    if (!Number.isFinite(index)) continue;
+    const rect = section.getBoundingClientRect();
+    if (event.clientY < rect.top + rect.height / 2) {
+      return Math.max(0, Math.min(index, maxIndex));
+    }
+    if (event.clientY <= rect.bottom) {
+      return Math.max(0, Math.min(index + 1, maxIndex));
+    }
+  }
+  return maxIndex;
+}
+
+function showBlockDropLine(root, targetIndex) {
+  const line = ensureBlockDropLine();
+  const sections = Array.from(root.querySelectorAll('.md-block'));
+  const targetSection = sections.find(function (section) {
+    const index = Number(section.dataset.index);
+    return Number.isFinite(index) && index >= targetIndex;
+  });
+  if (targetSection) {
+    root.insertBefore(line, targetSection);
+  } else {
+    root.appendChild(line);
+  }
+}
+
+function handleBlockDragOver(event) {
+  if (!blockDragState) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  const root = event.currentTarget;
+  const targetIndex = getBlockDropIndex(root, event);
+  blockDragState.targetIndex = targetIndex;
+  showBlockDropLine(root, targetIndex);
+}
+
+function handleBlockDrop(event) {
+  if (!blockDragState) return;
+  event.preventDefault();
+  const root = event.currentTarget;
+  const sourceIndex = blockDragState.sourceIndex;
+  const targetIndex = blockDragState.targetIndex ?? getBlockDropIndex(root, event);
+  cleanupBlockDrag();
+  reorderBlock(sourceIndex, targetIndex);
+}
+
+function cleanupBlockDrag() {
+  const state = blockDragState;
+  if (state && state.handle) {
+    state.handle.removeEventListener('pointermove', handleBlockPointerMove);
+    state.handle.removeEventListener('pointerup', finishBlockPointerDrag);
+    state.handle.removeEventListener('pointercancel', cancelBlockPointerDrag);
+    document.removeEventListener('pointermove', handleBlockPointerMove, true);
+    document.removeEventListener('pointerup', finishBlockPointerDrag, true);
+    document.removeEventListener('pointercancel', cancelBlockPointerDrag, true);
+    document.removeEventListener('mousemove', handleBlockPointerMove, true);
+    document.removeEventListener('mouseup', finishBlockPointerDrag, true);
+    try {
+      if (state.pointerId !== 'mouse') state.handle.releasePointerCapture(state.pointerId);
+    } catch (_) {
+    }
+  }
+  document.querySelectorAll('.md-block.dragging').forEach(function (section) {
+    section.classList.remove('dragging');
+  });
+  document.documentElement.classList.remove('block-reordering');
+  clearBlockDragHover(document);
+  hideBlockDropLine();
+  blockDragState = null;
+}
+
+function reorderBlock(sourceIndex, targetIndex) {
+  const maxIndex = reorderableBlockCount();
+  if (sourceIndex < 0 || sourceIndex >= maxIndex) return;
+  targetIndex = Math.max(0, Math.min(targetIndex, maxIndex));
+  if (targetIndex === sourceIndex || targetIndex === sourceIndex + 1) return;
+
+  const moved = blocks.splice(sourceIndex, 1)[0];
+  if (targetIndex > sourceIndex) targetIndex--;
+  blocks.splice(targetIndex, 0, moved);
+  activeIndex = -1;
+  ensureTrailingEmptyBlock();
+  renderAll();
+  post('input');
+}
+
 function renderAll(target, enhance) {
   const root = target || document.getElementById('editor');
   if (enhance === undefined) enhance = true;
   ensureTrailingEmptyBlock();
+  ensureBlockDragHandlers(root);
   root.innerHTML = '';
+  blockDragHoverIndex = -1;
   blocks.forEach(function (block, index) {
     const section = document.createElement('section');
     section.tabIndex = 0;
@@ -4791,9 +5502,13 @@ function renderAll(target, enhance) {
     section.addEventListener('click', function (event) {
       if (event.target.closest('a')) return;
       if (event.target.closest('input[type="checkbox"]')) return;
+      if (event.target.closest('.block-drag-handle')) return;
       beginEdit(index);
     });
-    section.addEventListener('focus', function () { beginEdit(index); });
+    section.addEventListener('focus', function (event) {
+      if (event.target !== section || section.querySelector(':active.block-drag-handle')) return;
+      beginEdit(index);
+    });
     root.appendChild(section);
     renderBlockInto(section, block, enhance);
   });
@@ -5382,6 +6097,7 @@ window.mdvSetBlocks = async function (nextBlocks) {
 
   blocks = Array.isArray(nextBlocks) && nextBlocks.length ? nextBlocks : [{ index: 0, source: '', html: '', kind: 'paragraph' }];
   const root = document.getElementById('editor');
+  ensureBlockDragHandlers(root);
   const scrollRatio = document.documentElement.scrollHeight <= window.innerHeight
     ? 0
     : window.scrollY / (document.documentElement.scrollHeight - window.innerHeight);
@@ -6803,6 +7519,7 @@ html, body {
     private void UpdateModeMenuChecks()
     {
         WysiwygModeMenuItem.IsChecked = _wysiwygMode;
+        ViewEditorMenuItem.IsChecked = !_wysiwygMode && _viewMode == ViewMode.EditorOnly;
         ViewBothMenuItem.IsChecked = !_wysiwygMode && _viewMode == ViewMode.Both;
         ViewPreviewMenuItem.IsChecked = !_wysiwygMode && _viewMode == ViewMode.PreviewOnly;
 
@@ -6899,6 +7616,16 @@ html, body {
             return;
         }
 
+        if (HandleCloseWindowMessage(message?.Type, message?.Markdown))
+        {
+            return;
+        }
+
+        if (HandleViewModeMessage(message?.Type, message?.Markdown))
+        {
+            return;
+        }
+
         if (string.Equals(message?.Type, "undo", StringComparison.OrdinalIgnoreCase))
         {
             _ = UndoWysiwygAsync(message!.Markdown);
@@ -6945,7 +7672,17 @@ html, body {
             return;
         }
 
+        if (HandleCloseWindowMessage(message?.Type))
+        {
+            return;
+        }
+
         if (HandleWebZoomMessage(message?.Type))
+        {
+            return;
+        }
+
+        if (HandleViewModeMessage(message?.Type))
         {
             return;
         }
@@ -6967,6 +7704,74 @@ html, body {
         ToggleTaskCheckbox(message.TaskIndex.Value, message.Checked.Value);
     }
 
+    private bool HandleCloseWindowMessage(string? type, string? markdown = null)
+    {
+        if (!string.Equals(type, "closeWindow", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (markdown is not null)
+        {
+            UpdateTextFromWysiwyg(markdown);
+        }
+
+        Close();
+        return true;
+    }
+    private bool HandleViewModeMessage(string? type, string? markdown = null)
+    {
+        if (string.IsNullOrWhiteSpace(type))
+        {
+            return false;
+        }
+
+        if (string.Equals(type, "viewWysiwyg", StringComparison.OrdinalIgnoreCase))
+        {
+            if (markdown is not null)
+            {
+                UpdateTextFromWysiwyg(markdown);
+            }
+
+            _ = SetWysiwygModeAsync(true);
+            return true;
+        }
+
+        if (string.Equals(type, "viewEditor", StringComparison.OrdinalIgnoreCase))
+        {
+            if (markdown is not null)
+            {
+                UpdateTextFromWysiwyg(markdown);
+            }
+
+            _ = SetSourceViewModeAsync(ViewMode.EditorOnly);
+            return true;
+        }
+
+        if (string.Equals(type, "viewPreview", StringComparison.OrdinalIgnoreCase))
+        {
+            if (markdown is not null)
+            {
+                UpdateTextFromWysiwyg(markdown);
+            }
+
+            _ = SetSourceViewModeAsync(ViewMode.PreviewOnly);
+            return true;
+        }
+
+        if (string.Equals(type, "viewSplit", StringComparison.OrdinalIgnoreCase))
+        {
+            if (markdown is not null)
+            {
+                UpdateTextFromWysiwyg(markdown);
+            }
+
+            _ = SetSourceViewModeAsync(ViewMode.Both);
+            return true;
+        }
+
+        return false;
+    }
     private bool HandleWebZoomMessage(string? type)
     {
         if (string.Equals(type, "zoomIn", StringComparison.OrdinalIgnoreCase))
@@ -7508,6 +8313,8 @@ html, body {
         double? WindowHeight);
 
     private sealed record ThemeDefinition(string Id, string DisplayName, ColorProfile Light, ColorProfile Dark, string LightLink, string DarkLink);
+
+    private sealed record ThemeProfileFile(string? Name, ColorProfile? Light, ColorProfile? Dark, string? LightLink, string? DarkLink);
 
     private sealed record ThemeFile(ThemePalette Dark, ThemePalette Light);
 

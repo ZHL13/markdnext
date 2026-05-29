@@ -1,4 +1,4 @@
-<Window x:Class="MarkDNext.MainWindow"
+﻿<Window x:Class="MarkDNext.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -17,7 +17,7 @@
         Drop="Window_Drop"
         KeyDown="Window_KeyDown"
         SourceInitialized="Window_SourceInitialized"
-        Icon="Logo.png"
+        Icon="pack://application:,,,/resources/app/Logo.png"
         Background="Transparent">
     <Window.Resources>
         <SolidColorBrush x:Key="{x:Static SystemColors.MenuBrushKey}" Color="#EAF3F6" />
@@ -415,7 +415,7 @@
                     <MenuItem Header="_PDF..." Click="ExportPdf_Click" />
                 </MenuItem>
                 <Separator />
-                <MenuItem Header="_Close Window" InputGestureText="Ctrl+W" Click="Exit_Click" />
+                <MenuItem Header="_Close Window" InputGestureText="Ctrl+Q" Click="Exit_Click" />
             </MenuItem>
             <MenuItem Header="_Edit">
                 <MenuItem Header="_Undo" InputGestureText="Ctrl+Z" Click="Undo_Click" />
@@ -433,9 +433,10 @@
                 <MenuItem x:Name="AutoCompletionMenuItem" Header="_Automatic Completion" InputGestureText="Ctrl+H" IsCheckable="True" Click="AutoCompletion_Click" />
             </MenuItem>
             <MenuItem Header="_View">
-                <MenuItem x:Name="WysiwygModeMenuItem" Header="_WYSIWYG" IsCheckable="True" Click="WysiwygMode_Click" />
-                <MenuItem x:Name="ViewBothMenuItem" Header="_Split View" IsCheckable="True" IsChecked="True" Click="SplitMode_Click" />
-                <MenuItem x:Name="ViewPreviewMenuItem" Header="_Preview Only" IsCheckable="True" Click="PreviewMode_Click" />
+                <MenuItem x:Name="WysiwygModeMenuItem" Header="_WYSIWYG" InputGestureText="Ctrl+W" IsCheckable="True" Click="WysiwygMode_Click" />
+                <MenuItem x:Name="ViewEditorMenuItem" Header="_Editor Only" InputGestureText="Ctrl+E" IsCheckable="True" Click="EditorMode_Click" />
+                <MenuItem x:Name="ViewBothMenuItem" Header="_Split View" InputGestureText="Ctrl+T" IsCheckable="True" IsChecked="True" Click="SplitMode_Click" />
+                <MenuItem x:Name="ViewPreviewMenuItem" Header="_Preview Only" InputGestureText="Ctrl+R" IsCheckable="True" Click="PreviewMode_Click" />
                 <MenuItem x:Name="HideMenuBarMenuItem" Header="_Hide Menu Bar" IsCheckable="True" Click="HideMenuBar_Click" />
                 <Separator />
                 <MenuItem x:Name="WordWrapMenuItem" Header="_Word Wrap" IsCheckable="True" IsChecked="True" Click="WordWrap_Click" />
@@ -452,11 +453,7 @@
                     <MenuItem x:Name="NormalThemeModeMenuItem" Header="_Normal Mode" IsCheckable="True" IsChecked="True" Click="NormalThemeMode_Click" />
                     <MenuItem x:Name="DarkThemeModeMenuItem" Header="_Dark Mode" IsCheckable="True" Click="DarkThemeMode_Click" />
                 </MenuItem>
-                <MenuItem Header="_Color Profile">
-                    <MenuItem Header="_Load..." Click="LoadColorProfile_Click" />
-                    <MenuItem Header="_Save Current As..." Click="SaveColorProfile_Click" />
-                    <MenuItem Header="_Reset Colors" Click="ResetColorProfile_Click" />
-                </MenuItem>
+
                 <Separator />
                 <MenuItem Header="_Window Material">
                     <MenuItem x:Name="MicaMaterialMenuItem" Header="_Mica" IsCheckable="True" Click="MicaMaterial_Click" />

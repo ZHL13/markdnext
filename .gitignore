@@ -13,6 +13,7 @@ dist/
 # Local SDK/bootstrap files
 .dotnet/
 .dotnet-install.ps1
+scripts/dotnet-install.ps1
 
 # IDE/user files
 .vs/

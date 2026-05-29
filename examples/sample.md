@@ -1,11 +1,11 @@
----
+﻿---
 title: MarkDNext showcase
-version: 0.5.0
+version: 0.6.0
 status: ready for screenshots
 ---
 
 <p align="center">
-  <img src="Logo.png" alt="MarkDNext logo" width="104">
+  <img src="../resources/app/Logo.png" alt="MarkDNext logo" width="104">
 </p>
 
 # MarkDNext
@@ -73,7 +73,7 @@ Console.WriteLine(DescribeExport("release-notes.md", copyAssets: true));
 
 The preview resolves relative image paths from the Markdown file folder.
 
-![MarkDNext logo](Logo.png)
+![MarkDNext logo](../resources/app/Logo.png)
 
 ## Notes
 
