@@ -431,6 +431,7 @@
                 <MenuItem Header="Insert _Image..." Click="InsertImage_Click" />
                 <Separator />
                 <MenuItem x:Name="AutoCompletionMenuItem" Header="_Automatic Completion" InputGestureText="Ctrl+H" IsCheckable="True" Click="AutoCompletion_Click" />
+                <MenuItem Header="_Preferences..." InputGestureText="Ctrl+," Click="Preferences_Click" />
             </MenuItem>
             <MenuItem Header="_View">
                 <MenuItem x:Name="WysiwygModeMenuItem" Header="_WYSIWYG" InputGestureText="Ctrl+W" IsCheckable="True" Click="WysiwygMode_Click" />

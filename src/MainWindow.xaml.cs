@@ -72,6 +72,8 @@ public partial class MainWindow : Window
     private bool _previewFailed;
     private bool _wysiwygMode;
     private bool _automaticCompletionEnabled;
+    private bool _renderBracketDisplayMath;
+    private bool _renderParentheticalInlineMath;
     private bool _menuBarHidden;
     private ViewMode _viewMode = ViewMode.Both;
     private ViewMode _viewModeBeforeWysiwyg = ViewMode.Both;
@@ -442,6 +444,8 @@ public partial class MainWindow : Window
 
             _startupWysiwygMode = settings.WysiwygMode ?? false;
             _automaticCompletionEnabled = settings.AutomaticCompletion ?? _automaticCompletionEnabled;
+            _renderBracketDisplayMath = settings.RenderBracketDisplayMath ?? _renderBracketDisplayMath;
+            _renderParentheticalInlineMath = _renderBracketDisplayMath && (settings.RenderParentheticalInlineMath ?? _renderParentheticalInlineMath);
             _menuBarHidden = settings.HideMenuBar ?? _menuBarHidden;
 
             AutoCompletionMenuItem.IsChecked = _automaticCompletionEnabled;
@@ -489,6 +493,8 @@ public partial class MainWindow : Window
                 _viewMode.ToString(),
                 _viewModeBeforeWysiwyg.ToString(),
                 _automaticCompletionEnabled,
+                _renderBracketDisplayMath,
+                _renderBracketDisplayMath && _renderParentheticalInlineMath,
                 _menuBarHidden,
                 WordWrapMenuItem.IsChecked,
                 WindowState == WindowState.Minimized ? WindowState.Normal.ToString() : WindowState.ToString(),
@@ -704,6 +710,114 @@ public partial class MainWindow : Window
     private void AutoCompletion_Click(object sender, RoutedEventArgs e)
     {
         SetAutomaticCompletion(AutoCompletionMenuItem.IsChecked);
+    }
+
+    private void Preferences_Click(object sender, RoutedEventArgs e)
+    {
+        ShowPreferencesDialog();
+    }
+
+    private void ShowPreferencesDialog()
+    {
+        var optionLabel = new TextBlock
+        {
+            Text = "Render [\\n$\\n] as display math",
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var bracketMathBox = new CheckBox
+        {
+            Content = optionLabel,
+            IsChecked = _renderBracketDisplayMath,
+            Margin = new Thickness(0, 0, 0, 8),
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+        var inlineMathLabel = new TextBlock
+        {
+            Text = "Render ($) as in-line math",
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var inlineMathBox = new CheckBox
+        {
+            Content = inlineMathLabel,
+            IsChecked = _renderBracketDisplayMath && _renderParentheticalInlineMath,
+            Margin = new Thickness(24, 0, 0, 18),
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+        var okButton = new Button { Content = "OK", MinWidth = 72, IsDefault = true, Margin = new Thickness(0, 0, 8, 0) };
+        var cancelButton = new Button { Content = "Cancel", MinWidth = 72, IsCancel = true };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        buttons.Children.Add(okButton);
+        buttons.Children.Add(cancelButton);
+
+        var panel = new StackPanel { Margin = new Thickness(16), MinWidth = 320 };
+        panel.Children.Add(bracketMathBox);
+        panel.Children.Add(inlineMathBox);
+        panel.Children.Add(buttons);
+
+        var dialog = new Window
+        {
+            Title = "Preferences",
+            Owner = this,
+            Content = panel,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.NoResize
+        };
+        okButton.Click += (_, _) => dialog.DialogResult = true;
+
+        var surface = BrushFromHex(_colorProfile.Surface);
+        var page = BrushFromHex(_colorProfile.Page);
+        var text = BrushFromHex(_colorProfile.Text);
+        var muted = BrushFromHex(_colorProfile.Muted);
+        var line = BrushFromHex(_colorProfile.Line);
+        var chrome = BrushFromHex(_colorProfile.Chrome);
+
+        void UpdateInlineMathAvailability()
+        {
+            var parentEnabled = bracketMathBox.IsChecked == true;
+            inlineMathBox.IsEnabled = parentEnabled;
+            inlineMathLabel.Foreground = parentEnabled ? text : muted;
+            if (!parentEnabled)
+            {
+                inlineMathBox.IsChecked = false;
+            }
+        }
+
+        bracketMathBox.Checked += (_, _) => UpdateInlineMathAvailability();
+        bracketMathBox.Unchecked += (_, _) => UpdateInlineMathAvailability();
+
+        dialog.Background = surface;
+        panel.Background = surface;
+        bracketMathBox.Background = page;
+        bracketMathBox.Foreground = text;
+        optionLabel.Foreground = text;
+        inlineMathBox.Background = page;
+        inlineMathBox.Foreground = text;
+        okButton.Background = chrome;
+        okButton.Foreground = text;
+        okButton.BorderBrush = line;
+        cancelButton.Background = chrome;
+        cancelButton.Foreground = text;
+        cancelButton.BorderBrush = line;
+        UpdateInlineMathAvailability();
+
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        var bracketEnabled = bracketMathBox.IsChecked == true;
+        var inlineEnabled = bracketEnabled && inlineMathBox.IsChecked == true;
+        if (bracketEnabled == _renderBracketDisplayMath && inlineEnabled == _renderParentheticalInlineMath)
+        {
+            return;
+        }
+
+        _renderBracketDisplayMath = bracketEnabled;
+        _renderParentheticalInlineMath = inlineEnabled;
+        SaveSettings();
+        RefreshRenderedShells();
+        StatusText.Text = "Preferences updated.";
     }
 
     private void ToggleAutomaticCompletion()
@@ -2899,6 +3013,11 @@ public partial class MainWindow : Window
             ToggleAutomaticCompletion();
             e.Handled = true;
         }
+        else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.OemComma)
+        {
+            Preferences_Click(sender, e);
+            e.Handled = true;
+        }
         else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Z)
         {
             Undo_Click(sender, e);
@@ -3965,8 +4084,9 @@ window.mdvSetPreview = async function (html, sourceLine) {
             return RenderFrontMatterHtml(markdown);
         }
 
-        var protectedMarkdown = ExtractMathSegments(markdown, out var mathSegments);
+        var protectedMarkdown = ExtractMathSegments(markdown, out var mathSegments, _renderBracketDisplayMath, _renderParentheticalInlineMath);
         protectedMarkdown = ExtractImageSegments(protectedMarkdown, out var imageSegments);
+        protectedMarkdown = PreserveBlockquoteSoftLineBreaks(protectedMarkdown);
         var html = Markdown.ToHtml(protectedMarkdown, _markdownPipeline);
 
         foreach (var segment in mathSegments)
@@ -4417,7 +4537,105 @@ window.mdvSetPreview = async function (html, sourceLine) {
         return $"MDV_IMAGE_PLACEHOLDER_{index}_END";
     }
 
-    private static string ExtractMathSegments(string markdown, out List<MathSegment> segments)
+    private static string PreserveBlockquoteSoftLineBreaks(string markdown)
+    {
+        if (string.IsNullOrEmpty(markdown) || markdown.IndexOf('>') < 0)
+        {
+            return markdown;
+        }
+
+        var normalized = markdown.Replace("\r\n", "\n").Replace('\r', '\n');
+        var lines = normalized.Split('\n');
+        var builder = new StringBuilder(normalized.Length + lines.Length * 2);
+        var inBlockquoteFence = false;
+
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            var outputLine = line;
+            var isBlockquote = TryGetBlockquoteContent(line, out var content);
+            var contentText = content.TrimStart();
+            var isFenceLine = isBlockquote && IsMarkdownFenceLine(contentText);
+
+            if (isBlockquote)
+            {
+                if (!inBlockquoteFence
+                    && !isFenceLine
+                    && IsNonEmptyBlockquoteContent(contentText)
+                    && i + 1 < lines.Length
+                    && TryGetBlockquoteContent(lines[i + 1], out var nextContent)
+                    && IsNonEmptyBlockquoteContent(nextContent.TrimStart())
+                    && !IsMarkdownFenceLine(nextContent.TrimStart())
+                    && !EndsWithMarkdownHardBreak(line))
+                {
+                    outputLine += "  ";
+                }
+
+                if (isFenceLine)
+                {
+                    inBlockquoteFence = !inBlockquoteFence;
+                }
+            }
+            else
+            {
+                inBlockquoteFence = false;
+            }
+
+            if (i > 0)
+            {
+                builder.Append('\n');
+            }
+
+            builder.Append(outputLine);
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool TryGetBlockquoteContent(string line, out string content)
+    {
+        var index = 0;
+        var spaces = 0;
+        while (index < line.Length && line[index] == ' ' && spaces < 3)
+        {
+            index++;
+            spaces++;
+        }
+
+        if (index >= line.Length || line[index] != '>')
+        {
+            content = string.Empty;
+            return false;
+        }
+
+        index++;
+        if (index < line.Length && line[index] == ' ')
+        {
+            index++;
+        }
+
+        content = index < line.Length ? line[index..] : string.Empty;
+        return true;
+    }
+
+    private static bool IsNonEmptyBlockquoteContent(string content)
+    {
+        return !string.IsNullOrWhiteSpace(content);
+    }
+
+    private static bool IsMarkdownFenceLine(string content)
+    {
+        return content.StartsWith("```", StringComparison.Ordinal)
+            || content.StartsWith("~~~", StringComparison.Ordinal);
+    }
+
+    private static bool EndsWithMarkdownHardBreak(string line)
+    {
+        return line.EndsWith("  ", StringComparison.Ordinal)
+            || line.EndsWith("\\", StringComparison.Ordinal);
+    }
+
+    private static string ExtractMathSegments(string markdown, out List<MathSegment> segments, bool renderBracketDisplayMath, bool renderParentheticalInlineMath)
     {
         segments = new List<MathSegment>();
         var builder = new StringBuilder(markdown.Length);
@@ -4439,6 +4657,33 @@ window.mdvSetPreview = async function (html, sourceLine) {
                 inInlineCode = !inInlineCode;
                 builder.Append(markdown[i]);
                 i++;
+                continue;
+            }
+
+            if (renderBracketDisplayMath
+                && !inFence
+                && !inInlineCode
+                && markdown[i] == '['
+                && TryReadBracketDisplayMath(markdown, i, out var bracketMathSource, out var nextIndex))
+            {
+                var placeholder = CreateMathPlaceholder(segments.Count);
+                segments.Add(new MathSegment(placeholder, bracketMathSource, true));
+                builder.Append("\n\n").Append(placeholder).Append("\n\n");
+                i = nextIndex;
+                continue;
+            }
+
+            if (renderBracketDisplayMath
+                && renderParentheticalInlineMath
+                && !inFence
+                && !inInlineCode
+                && markdown[i] == '('
+                && TryReadParentheticalInlineMath(markdown, i, out var parentheticalMathSource, out var parentheticalNextIndex))
+            {
+                var placeholder = CreateMathPlaceholder(segments.Count);
+                segments.Add(new MathSegment(placeholder, parentheticalMathSource, false));
+                builder.Append(placeholder);
+                i = parentheticalNextIndex;
                 continue;
             }
 
@@ -4499,6 +4744,135 @@ window.mdvSetPreview = async function (html, sourceLine) {
     {
         return index + value.Length <= text.Length
             && string.CompareOrdinal(text, index, value, 0, value.Length) == 0;
+    }
+
+    private static bool TryReadParentheticalInlineMath(string markdown, int startIndex, out string source, out int nextIndex)
+    {
+        source = string.Empty;
+        nextIndex = startIndex;
+
+        if (startIndex > 0 && markdown[startIndex - 1] == ']')
+        {
+            return false;
+        }
+
+        var depth = 0;
+        for (var i = startIndex; i < markdown.Length; i++)
+        {
+            var ch = markdown[i];
+            if (ch == '\r' || ch == '\n')
+            {
+                return false;
+            }
+
+            if (ch == '(' && !IsEscaped(markdown, i))
+            {
+                depth++;
+                continue;
+            }
+
+            if (ch == ')' && !IsEscaped(markdown, i))
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    var rawSource = markdown[(startIndex + 1)..i].Trim();
+                    if (rawSource.Length == 0)
+                    {
+                        return false;
+                    }
+
+                    source = rawSource;
+                    nextIndex = i + 1;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsEscaped(string text, int index)
+    {
+        var backslashCount = 0;
+        for (var i = index - 1; i >= 0 && text[i] == '\\'; i--)
+        {
+            backslashCount++;
+        }
+
+        return backslashCount % 2 == 1;
+    }
+
+    private static bool TryReadBracketDisplayMath(string markdown, int startIndex, out string source, out int nextIndex)
+    {
+        source = string.Empty;
+        nextIndex = startIndex;
+
+        if (!IsAtLineStart(markdown, startIndex))
+        {
+            return false;
+        }
+
+        var openingLineEnd = FindLineEnd(markdown, startIndex);
+        if (markdown[startIndex..openingLineEnd].Trim() != "[")
+        {
+            return false;
+        }
+
+        var formulaStart = SkipLineBreak(markdown, openingLineEnd);
+        if (formulaStart >= markdown.Length)
+        {
+            return false;
+        }
+
+        var formulaEnd = FindLineEnd(markdown, formulaStart);
+        var closingLineStart = SkipLineBreak(markdown, formulaEnd);
+        if (closingLineStart >= markdown.Length)
+        {
+            return false;
+        }
+
+        var closingLineEnd = FindLineEnd(markdown, closingLineStart);
+        if (markdown[closingLineStart..closingLineEnd].Trim() != "]")
+        {
+            return false;
+        }
+
+        var rawSource = markdown[formulaStart..formulaEnd].Trim();
+        if (rawSource.Length == 0)
+        {
+            return false;
+        }
+
+        source = rawSource;
+        nextIndex = SkipLineBreak(markdown, closingLineEnd);
+        return true;
+    }
+
+    private static int FindLineEnd(string text, int startIndex)
+    {
+        var index = startIndex;
+        while (index < text.Length && text[index] != '\r' && text[index] != '\n')
+        {
+            index++;
+        }
+
+        return index;
+    }
+
+    private static int SkipLineBreak(string text, int index)
+    {
+        if (index < text.Length && text[index] == '\r')
+        {
+            index++;
+        }
+
+        if (index < text.Length && text[index] == '\n')
+        {
+            index++;
+        }
+
+        return index;
     }
 
     private static bool IsAtLineStart(string text, int index)
@@ -8425,6 +8799,8 @@ html, body {
         string? ViewMode,
         string? ViewModeBeforeWysiwyg,
         bool? AutomaticCompletion,
+        bool? RenderBracketDisplayMath,
+        bool? RenderParentheticalInlineMath,
         bool? HideMenuBar,
         bool? WordWrap,
         string? WindowState,

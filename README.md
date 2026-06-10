@@ -22,7 +22,7 @@ MarkDNext is a native Windows Markdown editor and viewer. It was vibe-coded with
 ### Markdown Syntax And Rendering
 
 - GitHub-style Markdown via Markdig advanced extensions, with relative images and links resolved from the Markdown file folder.
-- Bundled offline KaTeX and highlight.js for math and code rendering.
+- Bundled offline KaTeX and highlight.js for math and code rendering, with optional Preferences switches for bracket-delimited display math and parenthetical inline math.
 - Find in editor or preview; split view follows the currently focused pane.
 
 ### Export And Appearance

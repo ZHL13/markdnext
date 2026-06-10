@@ -14,21 +14,51 @@ public partial class App : Application
 
         ShutdownMode = ShutdownMode.OnLastWindowClose;
 
-        var files = e.Args
-            .Where(arg => !string.IsNullOrWhiteSpace(arg))
-            .Select(Path.GetFullPath)
-            .Where(File.Exists)
-            .ToArray();
-
-        if (files.Length == 0)
+        try
         {
-            new MainWindow().Show();
-            return;
+            var files = e.Args
+                .Select(TryResolveExistingFile)
+                .Where(file => file is not null)
+                .Cast<string>()
+                .ToArray();
+
+            if (files.Length == 0)
+            {
+                new MainWindow().Show();
+                return;
+            }
+
+            foreach (var file in files)
+            {
+                new MainWindow(file).Show();
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "MarkDNext could not start.\n\n" + ex.Message,
+                "MarkDNext",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            Shutdown(-1);
+        }
+    }
+
+    private static string? TryResolveExistingFile(string arg)
+    {
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            return null;
         }
 
-        foreach (var file in files)
+        try
         {
-            new MainWindow(file).Show();
+            var path = Path.GetFullPath(arg);
+            return File.Exists(path) ? path : null;
+        }
+        catch
+        {
+            return null;
         }
     }
 }

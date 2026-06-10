@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## 0.7.0 - 2026-06-10
+
+- Added an Edit > Preferences dialog, available with `Ctrl+,`.
+- Added optional renderer settings for bracket-delimited display math blocks and dependent parenthetical inline math.
+- Hardened application startup so launching the executable without a file opens a new untitled document reliably.
+- Preserved line breaks between consecutive non-empty blockquote lines during rendering.
+
 ## 0.6.1 - 2026-06-10
 
 - Improved startup responsiveness by loading the main UI and Markdown text before WebView2 finishes initializing.
