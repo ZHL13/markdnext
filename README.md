@@ -56,18 +56,20 @@ Release publishing is configured in `MarkDNext.csproj` as a self-contained, comp
 .\scripts\package-release.ps1
 ```
 
-The release helper publishes the app and leaves a single standalone executable at:
+The release helper publishes the app and leaves standalone executables at:
 
 ```text
 dist\MarkDNext-<version>-win-x64.exe
+dist\MarkDNext-latest-win-x64.exe
 ```
 
-Direct `dotnet publish -c Release` still works for local testing, while the release helper cleans `dist` down to the versioned executable used for GitHub releases.
+Direct `dotnet publish -c Release` still works for local testing, while the release helper cleans `dist` down to the versioned executable and the stable latest executable used for GitHub releases.
 
 Run it from Explorer or from a terminal:
 
 ```powershell
 .\dist\MarkDNext-<version>-win-x64.exe .\examples\sample.md
+.\dist\MarkDNext-latest-win-x64.exe .\examples\sample.md
 ```
 
 The preview requires Microsoft Edge WebView2 Runtime, which is already present on most current Windows 10/11 systems.

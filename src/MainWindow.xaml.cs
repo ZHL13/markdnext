@@ -33,9 +33,13 @@ public partial class MainWindow : Window
     private const string DefaultThemeId = "flat";
     private const double DefaultEditorLineSpacing = 1.2;
     private const int ListIndentSize = 4;
+    private const double WysiwygEditorMaxWidth = 920;
     private static readonly UTF8Encoding Utf8NoBom = new(false);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Lazy<IReadOnlyDictionary<string, string>> EmbeddedAssetNames = new(BuildEmbeddedAssetMap);
+    private static readonly Thickness SourceEditorPadding = new(14);
+    private static readonly Thickness SourceEditorHostPadding = new(0);
+    private static readonly Thickness PendingWysiwygEditorHostPadding = new(36, 28, 36, 60);
 
     private readonly IReadOnlyList<ThemeDefinition> _builtInThemes = LoadBuiltInThemes();
     private readonly MarkdownColorizer _markdownColorizer = new();
@@ -63,6 +67,8 @@ public partial class MainWindow : Window
     private bool _wysiwygReady;
     private bool _previewShellReady;
     private bool _wysiwygShellReady;
+    private bool _pendingStartupWysiwygMode;
+    private bool _pendingWysiwygEditorAppearance;
     private bool _previewFailed;
     private bool _wysiwygMode;
     private bool _automaticCompletionEnabled;
@@ -110,6 +116,13 @@ public partial class MainWindow : Window
         InitializeComponent();
         LoadSettings();
         ConfigureEditor();
+        EditorPane.SizeChanged += (_, _) =>
+        {
+            if (_pendingWysiwygEditorAppearance)
+            {
+                ApplyPendingWysiwygEditorAppearance(true);
+            }
+        };
         ConfigureSearchTargetTracking();
         ApplyAppearance();
         Loaded += MainWindow_Loaded;
@@ -144,6 +157,32 @@ public partial class MainWindow : Window
         Editor.TextArea.TextView.InvalidateLayer(KnownLayer.Background);
     }
 
+    private void ApplyPendingWysiwygEditorAppearance(bool enabled)
+    {
+        _pendingWysiwygEditorAppearance = enabled;
+        EditorHost.Margin = enabled ? PendingWysiwygEditorHostMargin() : SourceEditorHostPadding;
+        EditorHost.Padding = enabled ? PendingWysiwygEditorHostPadding : SourceEditorHostPadding;
+        EditorHost.Background = BrushFromHex(enabled ? _colorProfile.Page : _colorProfile.Surface);
+        Editor.ShowLineNumbers = !enabled;
+        Editor.Padding = enabled ? SourceEditorHostPadding : SourceEditorPadding;
+        Editor.Background = BrushFromHex(enabled ? _colorProfile.Page : _colorProfile.EditorBackground);
+        Editor.TextArea.TextView.Redraw();
+    }
+
+    private Thickness PendingWysiwygEditorHostMargin()
+    {
+        var availableWidth = EditorPane.ActualWidth - EditorPane.BorderThickness.Left - EditorPane.BorderThickness.Right;
+        if (!double.IsFinite(availableWidth) || availableWidth <= 0)
+        {
+            return SourceEditorHostPadding;
+        }
+
+        var zoom = Math.Clamp(_wysiwygZoom > 0 ? _wysiwygZoom : _webViewDefaultZoom, 0.25, 5.0);
+        var targetWidth = Math.Min(availableWidth, WysiwygEditorMaxWidth / zoom);
+        var side = Math.Max(0, (availableWidth - targetWidth) / 2);
+        return new Thickness(side, 0, side, 0);
+    }
+
     private void ConfigureSearchTargetTracking()
     {
         Editor.GotKeyboardFocus += (_, _) => SetSearchTarget(SearchTarget.Editor);
@@ -160,25 +199,71 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        await InitializeWebViewsAsync();
+        ApplyStartupViewModeBeforeWebView();
 
         if (!string.IsNullOrWhiteSpace(_initialFilePath) && File.Exists(_initialFilePath))
         {
-            LoadFile(_initialFilePath);
+            await LoadFileAsync(_initialFilePath);
         }
         else
         {
             NewDocument();
         }
 
-        await ApplyStartupViewModeAsync();
         _settingsReady = true;
+        BeginWebViewInitialization();
+    }
+
+    private void ApplyStartupViewModeBeforeWebView()
+    {
+        _pendingStartupWysiwygMode = _startupWysiwygMode;
+        _wysiwygMode = false;
+        Editor.Visibility = Visibility.Visible;
+        Wysiwyg.Visibility = Visibility.Collapsed;
+
+        if (_startupWysiwygMode)
+        {
+            SetViewMode(ViewMode.EditorOnly, persist: false);
+            ApplyPendingWysiwygEditorAppearance(true);
+            StatusText.Text = "Loading WYSIWYG renderer...";
+            return;
+        }
+
+        SetViewMode(_startupViewMode, persist: false);
+        ApplyPendingWysiwygEditorAppearance(false);
+        if (_startupViewMode != ViewMode.EditorOnly)
+        {
+            StatusText.Text = "Loading preview renderer...";
+        }
+    }
+
+    private void BeginWebViewInitialization()
+    {
+        Dispatcher.BeginInvoke(new Action(() => _ = InitializeWebViewsAsync()), DispatcherPriority.ContextIdle);
     }
 
     private async Task InitializeWebViewsAsync()
     {
         ConfigureWebViewUserDataFolder(Preview);
         ConfigureWebViewUserDataFolder(Wysiwyg);
+
+        if (_startupWysiwygMode)
+        {
+            await InitializeWysiwygWebViewAsync();
+            await InitializePreviewWebViewAsync();
+            return;
+        }
+
+        await InitializePreviewWebViewAsync();
+        await InitializeWysiwygWebViewAsync();
+    }
+
+    private async Task InitializePreviewWebViewAsync()
+    {
+        if (_previewReady || _previewFailed)
+        {
+            return;
+        }
 
         try
         {
@@ -193,6 +278,11 @@ public partial class MainWindow : Window
             ConfigureDocumentResourceHandler(Preview.CoreWebView2);
             MapAssetFolder(Preview.CoreWebView2);
             _previewReady = true;
+
+            if (PreviewPane.Visibility == Visibility.Visible)
+            {
+                ScheduleRender();
+            }
         }
         catch (Exception ex)
         {
@@ -204,6 +294,14 @@ public partial class MainWindow : Window
                 "MarkDNext",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
+        }
+    }
+
+    private async Task InitializeWysiwygWebViewAsync()
+    {
+        if (_wysiwygReady)
+        {
+            return;
         }
 
         try
@@ -219,9 +317,20 @@ public partial class MainWindow : Window
             ConfigureDocumentResourceHandler(Wysiwyg.CoreWebView2);
             MapAssetFolder(Wysiwyg.CoreWebView2);
             _wysiwygReady = true;
+
+            if (_pendingStartupWysiwygMode)
+            {
+                _pendingStartupWysiwygMode = false;
+                await SetWysiwygModeAsync(true, persist: false);
+            }
+            else if (_wysiwygMode)
+            {
+                await RenderWysiwygAsync();
+            }
         }
         catch (Exception ex)
         {
+            _pendingStartupWysiwygMode = false;
             _wysiwygReady = false;
             Debug.WriteLine(ex);
         }
@@ -376,7 +485,7 @@ public partial class MainWindow : Window
                 string.IsNullOrWhiteSpace(_currentThemeId) ? _colorProfile : null,
                 string.IsNullOrWhiteSpace(_currentThemeId) ? _linkColor : null,
                 _windowBackdrop.ToString(),
-                _wysiwygMode,
+                _wysiwygMode || _pendingStartupWysiwygMode,
                 _viewMode.ToString(),
                 _viewModeBeforeWysiwyg.ToString(),
                 _automaticCompletionEnabled,
@@ -438,7 +547,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void Open_Click(object sender, RoutedEventArgs e)
+    private async void Open_Click(object sender, RoutedEventArgs e)
     {
         if (!ConfirmSaveChanges())
         {
@@ -453,7 +562,7 @@ public partial class MainWindow : Window
 
         if (dialog.ShowDialog(this) == true)
         {
-            LoadFile(dialog.FileName);
+            await LoadFileAsync(dialog.FileName);
         }
     }
 
@@ -1798,6 +1907,7 @@ public partial class MainWindow : Window
         UpdateWindowMaterialMenuChecks();
         UpdateModeMenuChecks();
         UpdateMenuBarVisibility();
+        ApplyPendingWysiwygEditorAppearance(_pendingStartupWysiwygMode && !_wysiwygMode);
     }
 
     private string EditorLinkColor()
@@ -2872,7 +2982,7 @@ public partial class MainWindow : Window
             var file = files.FirstOrDefault(file => File.Exists(file) && IsMarkdownFile(file));
             if (file is not null && ConfirmSaveChanges())
             {
-                LoadFile(file);
+                await LoadFileAsync(file);
                 e.Handled = true;
                 return;
             }
@@ -2939,12 +3049,13 @@ public partial class MainWindow : Window
         }
     }
 
-    private void LoadFile(string path)
+    private async Task LoadFileAsync(string path)
     {
         try
         {
             var fullPath = Path.GetFullPath(path);
-            var text = File.ReadAllText(fullPath, Encoding.UTF8);
+            StatusText.Text = $"Opening {Path.GetFileName(fullPath)}...";
+            var text = await File.ReadAllTextAsync(fullPath, Encoding.UTF8);
 
             _isLoadingDocument = true;
             Editor.Text = text;
@@ -3158,7 +3269,21 @@ public partial class MainWindow : Window
     private void ScheduleRender()
     {
         _renderTimer.Stop();
+        if (!ShouldSchedulePreviewRender())
+        {
+            return;
+        }
+
         _renderTimer.Start();
+    }
+
+    private bool ShouldSchedulePreviewRender()
+    {
+        return !_wysiwygMode
+            && !_previewFailed
+            && _previewReady
+            && Preview.CoreWebView2 is not null
+            && PreviewPane.Visibility == Visibility.Visible;
     }
 
     private void SchedulePreviewScrollSync()
@@ -6597,11 +6722,11 @@ refreshEnhancements(document);
             e.Cancel = true;
             if (IsMarkdownFile(localPath))
             {
-                Dispatcher.BeginInvoke(() =>
+                Dispatcher.BeginInvoke(async () =>
                 {
                     if (ConfirmSaveChanges())
                     {
-                        LoadFile(localPath);
+                        await LoadFileAsync(localPath);
                     }
                 });
             }
@@ -7452,21 +7577,6 @@ html, body {
         yield return new MarkdownCompletionData("| table |", "Markdown table", "| Column | Value |\n| --- | --- |\n|  |  |", 28);
     }
 
-    private async Task ApplyStartupViewModeAsync()
-    {
-        if (_startupWysiwygMode)
-        {
-            await SetWysiwygModeAsync(true, persist: false);
-            return;
-        }
-
-        _wysiwygMode = false;
-        Editor.Visibility = Visibility.Visible;
-        Wysiwyg.Visibility = Visibility.Collapsed;
-        SetViewMode(_startupViewMode, persist: false);
-        UpdateModeMenuChecks();
-    }
-
     private void SetViewMode(ViewMode mode)
     {
         SetViewMode(mode, persist: true);
@@ -7540,11 +7650,21 @@ html, body {
 
     private async Task SetWysiwygModeAsync(bool enabled, bool persist)
     {
+        if (!enabled)
+        {
+            _pendingStartupWysiwygMode = false;
+            ApplyPendingWysiwygEditorAppearance(false);
+        }
+
         if (enabled && !_wysiwygReady)
         {
-            StatusText.Text = "WYSIWYG mode needs Microsoft Edge WebView2 Runtime.";
-            WysiwygModeMenuItem.IsChecked = false;
-            UpdateModeMenuChecks();
+            _pendingStartupWysiwygMode = true;
+            _wysiwygMode = false;
+            Editor.Visibility = Visibility.Visible;
+            Wysiwyg.Visibility = Visibility.Collapsed;
+            SetViewMode(ViewMode.EditorOnly, persist: false);
+            ApplyPendingWysiwygEditorAppearance(true);
+            StatusText.Text = "Loading WYSIWYG renderer...";
             return;
         }
 
@@ -7569,6 +7689,7 @@ html, body {
         }
 
         _wysiwygMode = enabled;
+        ApplyPendingWysiwygEditorAppearance(false);
         Editor.Visibility = enabled ? Visibility.Collapsed : Visibility.Visible;
         Wysiwyg.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
 

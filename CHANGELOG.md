@@ -1,5 +1,13 @@
 ﻿# Changelog
 
+## 0.6.1 - 2026-06-10
+
+- Improved startup responsiveness by loading the main UI and Markdown text before WebView2 finishes initializing.
+- Deferred preview and WYSIWYG rendering until the corresponding WebView2 instance is ready.
+- Added a WYSIWYG-like plain-text placeholder while WYSIWYG mode is pending, with hidden line numbers and matching centered content width.
+- Avoided scheduling preview renders when the preview pane is not visible.
+- Updated packaging to emit both a versioned executable and a stable `MarkDNext-latest-win-x64.exe` executable.
+
 ## 0.6.0 - 2026-05-30
 
 - Reorganized the repository into `src/`, `resources/`, `examples/`, `docs/`, and `scripts/` so the source tree and GitHub view are cleaner.

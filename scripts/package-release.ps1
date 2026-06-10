@@ -26,11 +26,15 @@ if ($LASTEXITCODE -ne 0) {
 
 $source = Join-Path $dist 'MarkDNext.exe'
 $targetName = "MarkDNext-$Version-win-x64.exe"
+$latestName = 'MarkDNext-latest-win-x64.exe'
 $target = Join-Path $dist $targetName
+$latest = Join-Path $dist $latestName
 Copy-Item -LiteralPath $source -Destination $target -Force
+Copy-Item -LiteralPath $source -Destination $latest -Force
 
+$keptNames = @($targetName, $latestName)
 Get-ChildItem -LiteralPath $dist -File |
-    Where-Object { $_.Name -ne $targetName } |
+    Where-Object { $keptNames -notcontains $_.Name } |
     Remove-Item -Force
 
-Get-Item -LiteralPath $target
+Get-Item -LiteralPath $target, $latest
