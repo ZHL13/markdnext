@@ -553,6 +553,33 @@ public partial class MainWindow : Window
         }
     }
 
+    private void NewWindow_Click(object sender, RoutedEventArgs e)
+    {
+        OpenNewWindow();
+    }
+
+    private void OpenNewWindow()
+    {
+        try
+        {
+            var window = new MainWindow();
+            window.Show();
+            window.Activate();
+            StatusText.Text = "Opened a new window for a new document.";
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+            StatusText.Text = "Could not open a new window.";
+            MessageBox.Show(
+                this,
+                "Could not open a new window.\n\n" + ex.Message,
+                "MarkDNext",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
     private async void Open_Click(object sender, RoutedEventArgs e)
     {
         if (!ConfirmSaveChanges())
@@ -2973,6 +3000,11 @@ public partial class MainWindow : Window
         if (_menuBarHidden && (e.Key == Key.F10 || e.SystemKey == Key.F10 || e.SystemKey == Key.LeftAlt || e.SystemKey == Key.RightAlt))
         {
             ToggleTemporaryMenuBar();
+            e.Handled = true;
+        }
+        else if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.N)
+        {
+            NewWindow_Click(sender, e);
             e.Handled = true;
         }
         else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.N)

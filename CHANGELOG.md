@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 0.7.1 - 2026-06-14
+
+- Added `Ctrl+Shift+N` and File > New Window to launch a separate MarkDNext instance with a new untitled document.
+
 ## 0.7.0 - 2026-06-10
 
 - Added an Edit > Preferences dialog, available with `Ctrl+,`.
