@@ -1,6 +1,6 @@
 ﻿---
 title: MarkDNext showcase
-version: 0.7.1
+version: 0.7.2
 status: ready for screenshots
 ---
 
