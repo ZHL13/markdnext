@@ -1,5 +1,8 @@
 ﻿# Changelog
 
+## 0.7.2 - 2026-06-20
+
+- Open local Markdown links in a new same-process window instead of replacing the current document.
 ## 0.7.1 - 2026-06-14
 
 - Added `Ctrl+Shift+N` and File > New Window to launch a separate MarkDNext instance with a new untitled document.

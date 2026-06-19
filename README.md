@@ -10,7 +10,7 @@ MarkDNext is a native Windows Markdown editor and viewer. It was vibe-coded with
 
 - WPF desktop app for Windows 10+ x64.
 - No Electron runtime; preview and WYSIWYG rendering use Microsoft Edge WebView2.
-- Open Markdown from the UI, drag and drop, or command line, launch a separate new-document instance with `Ctrl+Shift+N`, and auto-reload unchanged files.
+- Open Markdown from the UI, drag and drop, or command line, launch a separate new-document window with `Ctrl+Shift+N`, follow local Markdown links in a new window, and auto-reload unchanged files.
 
 ### Editing And Formatting
 

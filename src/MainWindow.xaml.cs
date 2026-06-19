@@ -560,12 +560,24 @@ public partial class MainWindow : Window
 
     private void OpenNewWindow()
     {
+        OpenWindow(null);
+    }
+
+    private void OpenDocumentInNewWindow(string filePath)
+    {
+        OpenWindow(filePath);
+    }
+
+    private void OpenWindow(string? filePath)
+    {
         try
         {
-            var window = new MainWindow();
+            var window = new MainWindow(filePath);
             window.Show();
             window.Activate();
-            StatusText.Text = "Opened a new window for a new document.";
+            StatusText.Text = string.IsNullOrWhiteSpace(filePath)
+                ? "Opened a new window for a new document."
+                : $"Opened {Path.GetFileName(filePath)} in a new window.";
         }
         catch (Exception ex)
         {
@@ -7128,13 +7140,7 @@ refreshEnhancements(document);
             e.Cancel = true;
             if (IsMarkdownFile(localPath))
             {
-                Dispatcher.BeginInvoke(async () =>
-                {
-                    if (ConfirmSaveChanges())
-                    {
-                        await LoadFileAsync(localPath);
-                    }
-                });
+                Dispatcher.BeginInvoke(() => OpenDocumentInNewWindow(localPath));
             }
             else
             {
