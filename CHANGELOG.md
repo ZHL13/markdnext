@@ -1,5 +1,11 @@
 ﻿# Changelog
 
+## 0.8.0 - 2026-09-27
+
+- Halved the window minimum width and height limits.
+- Added scroll-below-the-document space and a two-line bottom lookahead to the source editor and WYSIWYG editor.
+- Added an independent Preferences option to render `\[...\]` as inline math.
+
 ## 0.7.2 - 2026-06-20
 
 - Open local Markdown links in a new same-process window instead of replacing the current document.

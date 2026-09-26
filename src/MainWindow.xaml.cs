@@ -74,6 +74,8 @@ public partial class MainWindow : Window
     private bool _automaticCompletionEnabled;
     private bool _renderBracketDisplayMath;
     private bool _renderParentheticalInlineMath;
+    private bool _renderBracketInlineMath;
+    private bool _editorLookaheadPending;
     private bool _menuBarHidden;
     private ViewMode _viewMode = ViewMode.Both;
     private ViewMode _viewModeBeforeWysiwyg = ViewMode.Both;
@@ -137,10 +139,12 @@ public partial class MainWindow : Window
         Editor.Options.EnableHyperlinks = false;
         Editor.Options.EnableEmailHyperlinks = false;
         Editor.Options.HighlightCurrentLine = false;
+        Editor.Options.AllowScrollBelowDocument = true;
         Editor.TextArea.Caret.PositionChanged += (_, _) =>
         {
             UpdatePosition();
             SchedulePreviewScrollSync();
+            ScheduleEditorCaretLookahead();
             InvalidateEditorLineBackgrounds();
         };
         Editor.TextArea.SelectionChanged += (_, _) => InvalidateEditorLineBackgrounds();
@@ -446,6 +450,7 @@ public partial class MainWindow : Window
             _automaticCompletionEnabled = settings.AutomaticCompletion ?? _automaticCompletionEnabled;
             _renderBracketDisplayMath = settings.RenderBracketDisplayMath ?? _renderBracketDisplayMath;
             _renderParentheticalInlineMath = _renderBracketDisplayMath && (settings.RenderParentheticalInlineMath ?? _renderParentheticalInlineMath);
+            _renderBracketInlineMath = settings.RenderBracketInlineMath ?? _renderBracketInlineMath;
             _menuBarHidden = settings.HideMenuBar ?? _menuBarHidden;
 
             AutoCompletionMenuItem.IsChecked = _automaticCompletionEnabled;
@@ -495,6 +500,7 @@ public partial class MainWindow : Window
                 _automaticCompletionEnabled,
                 _renderBracketDisplayMath,
                 _renderBracketDisplayMath && _renderParentheticalInlineMath,
+                _renderBracketInlineMath,
                 _menuBarHidden,
                 WordWrapMenuItem.IsChecked,
                 WindowState == WindowState.Minimized ? WindowState.Normal.ToString() : WindowState.ToString(),
@@ -779,7 +785,19 @@ public partial class MainWindow : Window
         {
             Content = inlineMathLabel,
             IsChecked = _renderBracketDisplayMath && _renderParentheticalInlineMath,
-            Margin = new Thickness(24, 0, 0, 18),
+            Margin = new Thickness(24, 0, 0, 8),
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+        var bracketInlineMathLabel = new TextBlock
+        {
+            Text = "Render \\[$\\] as inline math",
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var bracketInlineMathBox = new CheckBox
+        {
+            Content = bracketInlineMathLabel,
+            IsChecked = _renderBracketInlineMath,
+            Margin = new Thickness(0, 0, 0, 18),
             VerticalContentAlignment = VerticalAlignment.Center
         };
         var okButton = new Button { Content = "OK", MinWidth = 72, IsDefault = true, Margin = new Thickness(0, 0, 8, 0) };
@@ -791,6 +809,7 @@ public partial class MainWindow : Window
         var panel = new StackPanel { Margin = new Thickness(16), MinWidth = 320 };
         panel.Children.Add(bracketMathBox);
         panel.Children.Add(inlineMathBox);
+        panel.Children.Add(bracketInlineMathBox);
         panel.Children.Add(buttons);
 
         var dialog = new Window
@@ -832,6 +851,9 @@ public partial class MainWindow : Window
         optionLabel.Foreground = text;
         inlineMathBox.Background = page;
         inlineMathBox.Foreground = text;
+        bracketInlineMathBox.Background = page;
+        bracketInlineMathBox.Foreground = text;
+        bracketInlineMathLabel.Foreground = text;
         okButton.Background = chrome;
         okButton.Foreground = text;
         okButton.BorderBrush = line;
@@ -847,13 +869,17 @@ public partial class MainWindow : Window
 
         var bracketEnabled = bracketMathBox.IsChecked == true;
         var inlineEnabled = bracketEnabled && inlineMathBox.IsChecked == true;
-        if (bracketEnabled == _renderBracketDisplayMath && inlineEnabled == _renderParentheticalInlineMath)
+        var bracketInlineEnabled = bracketInlineMathBox.IsChecked == true;
+        if (bracketEnabled == _renderBracketDisplayMath
+            && inlineEnabled == _renderParentheticalInlineMath
+            && bracketInlineEnabled == _renderBracketInlineMath)
         {
             return;
         }
 
         _renderBracketDisplayMath = bracketEnabled;
         _renderParentheticalInlineMath = inlineEnabled;
+        _renderBracketInlineMath = bracketInlineEnabled;
         SaveSettings();
         RefreshRenderedShells();
         StatusText.Text = "Preferences updated.";
@@ -2138,6 +2164,72 @@ public partial class MainWindow : Window
             ? baseLineHeight * _editorLineSpacing
             : 0;
         _editorLineSpacingGenerator.BaselinePadding = baselinePadding;
+    }
+
+    private void ScheduleEditorCaretLookahead()
+    {
+        if (_editorLookaheadPending)
+        {
+            return;
+        }
+
+        _editorLookaheadPending = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        {
+            _editorLookaheadPending = false;
+            ApplyEditorCaretLookahead();
+        }));
+    }
+
+    private void ApplyEditorCaretLookahead()
+    {
+        if (_wysiwygMode || Editor.Document is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var textView = Editor.TextArea.TextView;
+            var lineHeight = textView.DefaultLineHeight;
+            if (!double.IsFinite(lineHeight) || lineHeight <= 0)
+            {
+                return;
+            }
+
+            var caret = Editor.TextArea.Caret;
+            if (caret.Line != Editor.Document.LineCount)
+            {
+                return;
+            }
+
+            var caretRect = caret.CalculateCaretRectangle();
+            if (caretRect.IsEmpty)
+            {
+                return;
+            }
+
+            var lookahead = lineHeight * 2;
+            var viewportHeight = Editor.ViewportHeight;
+            if (!double.IsFinite(viewportHeight) || viewportHeight <= 0)
+            {
+                return;
+            }
+
+            var viewportBottom = Editor.VerticalOffset + viewportHeight;
+            if (caretRect.Bottom > viewportBottom - lookahead)
+            {
+                var target = caretRect.Bottom - viewportHeight + lookahead;
+                if (target > Editor.VerticalOffset)
+                {
+                    Editor.ScrollToVerticalOffset(target);
+                }
+            }
+        }
+        catch
+        {
+            // Layout can race caret movement; ignore transient failures.
+        }
     }
 
     private string EffectiveEditorBackgroundColor()
@@ -4128,7 +4220,7 @@ window.mdvSetPreview = async function (html, sourceLine) {
             return RenderFrontMatterHtml(markdown);
         }
 
-        var protectedMarkdown = ExtractMathSegments(markdown, out var mathSegments, _renderBracketDisplayMath, _renderParentheticalInlineMath);
+        var protectedMarkdown = ExtractMathSegments(markdown, out var mathSegments, _renderBracketDisplayMath, _renderParentheticalInlineMath, _renderBracketInlineMath);
         protectedMarkdown = ExtractImageSegments(protectedMarkdown, out var imageSegments);
         protectedMarkdown = PreserveBlockquoteSoftLineBreaks(protectedMarkdown);
         var html = Markdown.ToHtml(protectedMarkdown, _markdownPipeline);
@@ -4679,7 +4771,7 @@ window.mdvSetPreview = async function (html, sourceLine) {
             || line.EndsWith("\\", StringComparison.Ordinal);
     }
 
-    private static string ExtractMathSegments(string markdown, out List<MathSegment> segments, bool renderBracketDisplayMath, bool renderParentheticalInlineMath)
+    private static string ExtractMathSegments(string markdown, out List<MathSegment> segments, bool renderBracketDisplayMath, bool renderParentheticalInlineMath, bool renderBracketInlineMath)
     {
         segments = new List<MathSegment>();
         var builder = new StringBuilder(markdown.Length);
@@ -4701,6 +4793,19 @@ window.mdvSetPreview = async function (html, sourceLine) {
                 inInlineCode = !inInlineCode;
                 builder.Append(markdown[i]);
                 i++;
+                continue;
+            }
+
+            if (renderBracketInlineMath
+                && !inFence
+                && !inInlineCode
+                && markdown[i] == '\\'
+                && TryReadBackslashBracketMath(markdown, i, out var backslashMathSource, out var backslashNextIndex))
+            {
+                var placeholder = CreateMathPlaceholder(segments.Count);
+                segments.Add(new MathSegment(placeholder, backslashMathSource, false));
+                builder.Append(placeholder);
+                i = backslashNextIndex;
                 continue;
             }
 
@@ -4847,6 +4952,33 @@ window.mdvSetPreview = async function (html, sourceLine) {
         return backslashCount % 2 == 1;
     }
 
+    private static bool TryReadBackslashBracketMath(string markdown, int startIndex, out string source, out int nextIndex)
+    {
+        source = string.Empty;
+        nextIndex = startIndex;
+
+        if (!StartsWithAt(markdown, startIndex, "\\["))
+        {
+            return false;
+        }
+
+        var end = markdown.IndexOf("\\]", startIndex + 2, StringComparison.Ordinal);
+        if (end <= startIndex + 2)
+        {
+            return false;
+        }
+
+        var rawSource = markdown[(startIndex + 2)..end].Trim();
+        if (rawSource.Length == 0)
+        {
+            return false;
+        }
+
+        source = rawSource;
+        nextIndex = end + 2;
+        return true;
+    }
+
     private static bool TryReadBracketDisplayMath(string markdown, int startIndex, out string source, out int nextIndex)
     {
         source = string.Empty;
@@ -4978,6 +5110,10 @@ html, body {
   overscroll-behavior-x: none;
   margin: 0 auto;
   padding: 28px 36px 60px;
+}
+#editor.scroll-below {
+  padding: 28px 36px calc(50vh + 64.8px);
+  padding: 28px 36px calc(50vh + 2lh);
 }
 .md-block {
   position: relative;
@@ -5389,7 +5525,30 @@ let blockDragHoverIndex = -1;
 window.mdvSetWebViewZoomFactor = function (zoom) {
   const value = Math.max(0.25, Math.min(5, Number(zoom) || 1));
   document.documentElement.style.setProperty('--webview-zoom', String(value));
+  scheduleScrollBelowUpdate();
 };
+
+let scrollBelowFrame = 0;
+function scheduleScrollBelowUpdate() {
+  if (scrollBelowFrame) return;
+  scrollBelowFrame = requestAnimationFrame(function () {
+    scrollBelowFrame = 0;
+    updateScrollBelow();
+  });
+}
+
+function updateScrollBelow() {
+  const editor = document.getElementById('editor');
+  if (!editor) return;
+  editor.classList.remove('scroll-below');
+  if (activeIndex >= 0) return;
+  const fits = document.documentElement.scrollHeight <= window.innerHeight;
+  if (!fits) {
+    editor.classList.add('scroll-below');
+  }
+}
+
+window.addEventListener('resize', scheduleScrollBelowUpdate);
 
 const commands = [
   { label: 'Heading 1', hint: '# Title', template: '# ' },
@@ -6055,6 +6214,10 @@ function renderAll(target, enhance) {
     root.appendChild(section);
     renderBlockInto(section, block, enhance);
   });
+
+  if (!target) {
+    scheduleScrollBelowUpdate();
+  }
 }
 
 function autosize(textarea) {
@@ -6494,6 +6657,7 @@ function beginEdit(index, placement) {
   }
 
   activeIndex = index;
+  scheduleScrollBelowUpdate();
   const block = blocks[index];
   const section = document.querySelector('[data-index="' + index + '"]');
   if (!section) return;
@@ -6658,6 +6822,7 @@ window.mdvSetBlocks = async function (nextBlocks) {
     }
 
     root.replaceChildren(...Array.from(buffer.childNodes));
+    scheduleScrollBelowUpdate();
     const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
     window.scrollTo(0, Math.min(maxScroll, maxScroll * scrollRatio));
     return true;
@@ -8839,6 +9004,7 @@ html, body {
         bool? AutomaticCompletion,
         bool? RenderBracketDisplayMath,
         bool? RenderParentheticalInlineMath,
+        bool? RenderBracketInlineMath,
         bool? HideMenuBar,
         bool? WordWrap,
         string? WindowState,
