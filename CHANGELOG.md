@@ -1,5 +1,10 @@
 ﻿# Changelog
 
+## 0.9.0 - 2026-11-09
+
+- Faster startup: published without single-file compression, and with ReadyToRun for the portable build.
+- Added a framework-dependent build that is smaller and starts faster when the .NET 8 Desktop Runtime is installed; it is now the default download, while the self-contained build is marked `-portable`.
+
 ## 0.8.0 - 2026-09-27
 
 - Halved the window minimum width and height limits.
