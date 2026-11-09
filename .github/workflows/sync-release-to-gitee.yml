@@ -25,6 +25,7 @@ jobs:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           GITEE_OWNER: ZHL13
           GITEE_REPO: markdnext
+          MAX_GITEE_ASSET_MB: "100"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python <<'PY'
@@ -63,6 +64,29 @@ jobs:
           tag = release["tag_name"]
           name = release.get("name") or tag
           body = release.get("body") or ""
+          assets = release.get("assets", [])
+          # Conservative per-file limit; check size BEFORE downloading or uploading.
+          max_asset_bytes = int(os.environ.get("MAX_GITEE_ASSET_MB", "100")) * 1024 * 1024
+          oversized_assets = [a for a in assets if a.get("size", 0) > max_asset_bytes]
+          if oversized_assets:
+              links = []
+              for asset in oversized_assets:
+                  filename = asset["name"]
+                  url = asset.get("browser_download_url") or (
+                      f"https://github.com/{repository}/releases/download/"
+                      f"{urllib.parse.quote(release['tag_name'], safe='')}/"
+                      f"{urllib.parse.quote(filename, safe='')}"
+                  )
+                  size_mb = asset["size"] / (1024 * 1024)
+                  links.append(f"- [{filename}]({url}) ({size_mb:.1f} MiB)")
+              body = body.rstrip() + ("\n\n" if body.strip() else "") + (
+                  "---\n\n"
+                  "### Files available on GitHub\n\n"
+                  "These files exceed the Gitee release attachment size limit "
+                  "and are available from GitHub instead:\n\n"
+                  + "\n".join(links)
+              )
+              print(f"Oversized assets: {len(oversized_assets)}; GitHub links added to release notes", flush=True)
           target = release.get("target_commitish") or "main"
           prerelease = "true" if release.get("prerelease") else "false"
           base = f"https://gitee.com/api/v5/repos/{gitee_owner}/{gitee_repo}"
@@ -173,10 +197,14 @@ jobs:
 
           release_id = gitee_release["id"]
           existing_assets = gitee_list_assets(release_id)
-          assets = release.get("assets", [])
           print(f"GitHub release assets: {len(assets)}", flush=True)
           for asset in assets:
               filename = asset["name"]
+              if asset.get("size", 0) > max_asset_bytes:
+                  print(f"Skip oversized asset: {filename} "
+                        f"({asset['size'] / (1024 * 1024):.1f} MiB > "
+                        f"{max_asset_bytes / (1024 * 1024):.0f} MiB)", flush=True)
+                  continue
               if filename in existing_assets:
                   print(f"Skip existing asset: {filename}", flush=True)
                   continue
