@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## 0.9.1 - 2026-11-27
+
+- Aligned Markdown rendering with GitHub Flavored Markdown; non-standard emphasis markers such as `==`, `++`, `~`, and `^` are no longer converted into highlight, inserted, subscript, or superscript formatting.
+- Preserved the hierarchy and alignment of directory trees and box-drawing diagrams.
+- Added a right-click context menu to the source editor.
+- Added arrow-key scrolling in preview-only mode.
+
 ## 0.9.0 - 2026-11-09
 
 - Faster startup: published without single-file compression, and with ReadyToRun for the portable build.

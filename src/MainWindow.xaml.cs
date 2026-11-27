@@ -2,6 +2,7 @@
 using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Rendering;
 using Markdig;
+using Markdig.Extensions.EmphasisExtras;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
 using System.ComponentModel;
@@ -105,7 +106,13 @@ public partial class MainWindow : Window
         _initialFilePath = filePath;
         _assetFolder = Path.Combine(AppContext.BaseDirectory, "Assets");
         _markdownPipeline = new MarkdownPipelineBuilder()
-            .UseAdvancedExtensions()
+            .UsePipeTables()
+            .UseTaskLists()
+            .UseAutoLinks()
+            .UseEmphasisExtras(EmphasisExtraOptions.Strikethrough)
+            .UseAlertBlocks()
+            .UseFootnotes()
+            .UseAutoIdentifiers()
             .Build();
 
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(140) };
@@ -156,6 +163,38 @@ public partial class MainWindow : Window
         _editorLineBackgroundRenderer = new EditorLineBackgroundRenderer(Editor);
         Editor.TextArea.TextView.BackgroundRenderers.Add(_editorLineBackgroundRenderer);
         Editor.TextArea.TextView.LineTransformers.Add(_markdownColorizer);
+
+        ConfigureEditorContextMenu();
+    }
+
+    private void ConfigureEditorContextMenu()
+    {
+        var menu = new ContextMenu();
+
+        var undo = new MenuItem { Header = "Undo", InputGestureText = "Ctrl+Z" };
+        undo.Click += Undo_Click;
+        var redo = new MenuItem { Header = "Redo", InputGestureText = "Ctrl+Y" };
+        redo.Click += Redo_Click;
+        menu.Items.Add(undo);
+        menu.Items.Add(redo);
+        menu.Items.Add(new Separator());
+
+        var cut = new MenuItem { Header = "Cut", InputGestureText = "Ctrl+X" };
+        cut.Click += Cut_Click;
+        var copy = new MenuItem { Header = "Copy", InputGestureText = "Ctrl+C" };
+        copy.Click += Copy_Click;
+        var paste = new MenuItem { Header = "Paste", InputGestureText = "Ctrl+V" };
+        paste.Click += Paste_Click;
+        menu.Items.Add(cut);
+        menu.Items.Add(copy);
+        menu.Items.Add(paste);
+        menu.Items.Add(new Separator());
+
+        var selectAll = new MenuItem { Header = "Select All", InputGestureText = "Ctrl+A" };
+        selectAll.Click += (_, _) => Editor.SelectAll();
+        menu.Items.Add(selectAll);
+
+        Editor.ContextMenu = menu;
     }
 
     private void InvalidateEditorLineBackgrounds()
@@ -3199,6 +3238,40 @@ public partial class MainWindow : Window
             Print_Click(sender, e);
             e.Handled = true;
         }
+        else if (Keyboard.Modifiers == ModifierKeys.None && IsPreviewOnlyMode() && TryScrollPreviewWithArrowKey(e.Key))
+        {
+            e.Handled = true;
+        }
+    }
+
+    private bool IsPreviewOnlyMode()
+    {
+        return !_wysiwygMode && _viewMode == ViewMode.PreviewOnly;
+    }
+
+    private bool TryScrollPreviewWithArrowKey(Key key)
+    {
+        if (Preview.CoreWebView2 is null)
+        {
+            return false;
+        }
+
+        var script = key switch
+        {
+            Key.Up => "window.scrollBy(0, -48);",
+            Key.Down => "window.scrollBy(0, 48);",
+            Key.Left => "window.scrollBy(-48, 0);",
+            Key.Right => "window.scrollBy(48, 0);",
+            _ => null
+        };
+
+        if (script is null)
+        {
+            return false;
+        }
+
+        _ = Preview.CoreWebView2.ExecuteScriptAsync(script);
+        return true;
     }
 
     private static bool IsControlZoomModifier()
@@ -4220,6 +4293,11 @@ window.mdvSetPreview = async function (html, sourceLine) {
             return RenderFrontMatterHtml(markdown);
         }
 
+        if (IsTreeDiagramBlock(markdown))
+        {
+            return $"<pre><code class=\"nohighlight\">{WebUtility.HtmlEncode(markdown)}</code></pre>";
+        }
+
         var protectedMarkdown = ExtractMathSegments(markdown, out var mathSegments, _renderBracketDisplayMath, _renderParentheticalInlineMath, _renderBracketInlineMath);
         protectedMarkdown = ExtractImageSegments(protectedMarkdown, out var imageSegments);
         protectedMarkdown = PreserveBlockquoteSoftLineBreaks(protectedMarkdown);
@@ -4263,6 +4341,36 @@ window.mdvSetPreview = async function (html, sourceLine) {
         return lines.Length >= 3
             && lines[0].Trim() == "---"
             && lines[^1].Trim() == "---";
+    }
+
+    private static bool IsTreeDiagramBlock(string markdown)
+    {
+        var lines = markdown.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        var significant = 0;
+        var treeLines = 0;
+        foreach (var line in lines)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            significant++;
+            var trimmed = line.TrimStart();
+            if (trimmed.Length > 0 && IsTreeDiagramChar(trimmed[0]))
+            {
+                treeLines++;
+            }
+        }
+
+        return significant >= 2 && treeLines * 2 >= significant;
+    }
+
+    private static bool IsTreeDiagramChar(char value)
+    {
+        return value is '├' or '│' or '└' or '┌' or '┐' or '┘' or '┤' or '┬' or '┴' or '┼'
+            or '─' or '═' or '║' or '╔' or '╗' or '╚' or '╝' or '╠' or '╣' or '╦' or '╩' or '╬'
+            or '╭' or '╮' or '╰' or '╯';
     }
 
     private static string RenderFrontMatterHtml(string markdown)
@@ -5251,6 +5359,12 @@ html.block-reordering * {
   border: 0;
   border-radius: 0;
   padding: 14px 16px;
+}
+.md-rendered pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: .9em;
 }
 .md-rendered table {
   border-collapse: collapse;
